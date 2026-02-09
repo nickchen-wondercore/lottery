@@ -72,6 +72,27 @@ body {
   box-shadow: 0 4px 16px rgba(233, 69, 96, 0.5);
 }
 
+#btn-spin {
+  background: linear-gradient(135deg, #27ae60, #1e8449);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3);
+}
+
+#btn-spin:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2ecc71, #27ae60);
+  box-shadow: 0 4px 16px rgba(39, 174, 96, 0.5);
+}
+
+#btn-spin.spinning {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
+}
+
+#btn-spin.spinning:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ff6b6b, #e74c3c);
+  box-shadow: 0 4px 16px rgba(231, 76, 60, 0.5);
+}
+
 #btn-draw {
   background: linear-gradient(135deg, #f5a623, #e8891c);
   color: #fff;

@@ -2,7 +2,7 @@
  * app.js — 應用程式控制器：狀態機、UI 綁定、抽獎流程
  */
 const App = (() => {
-  // States: IDLE → LOADING → READY → TURBULENCE → DRAWING → COMPLETE
+  // States: IDLE → LOADING → READY → SPINNING → DRAWING → SPINNING/COMPLETE
   let state = 'IDLE';
   let names = [];
   let winners = [];
@@ -12,6 +12,7 @@ const App = (() => {
 
   // DOM
   const btnLoad = document.getElementById('btn-load');
+  const btnSpin = document.getElementById('btn-spin');
   const btnDraw = document.getElementById('btn-draw');
   const btnReset = document.getElementById('btn-reset');
   const inputCount = document.getElementById('input-count');
@@ -40,9 +41,12 @@ const App = (() => {
 
   function updateUI() {
     btnLoad.disabled = state !== 'IDLE';
-    btnDraw.disabled = state !== 'READY';
-    btnReset.disabled = state === 'IDLE' || state === 'LOADING' || state === 'TURBULENCE' || state === 'DRAWING';
-    inputCount.disabled = state !== 'READY' && state !== 'IDLE';
+    btnSpin.disabled = (state !== 'READY' && state !== 'SPINNING');
+    btnSpin.textContent = state === 'SPINNING' ? '停止' : '轉動';
+    btnSpin.classList.toggle('spinning', state === 'SPINNING');
+    btnDraw.disabled = state !== 'SPINNING';
+    btnReset.disabled = (state === 'IDLE' || state === 'LOADING' || state === 'DRAWING');
+    inputCount.disabled = (state !== 'READY' && state !== 'IDLE' && state !== 'SPINNING');
     inputBallSize.disabled = state !== 'IDLE';
   }
 
@@ -111,8 +115,18 @@ const App = (() => {
     });
   }
 
+  function handleSpin() {
+    if (state === 'READY') {
+      Physics.startTurbulence();
+      setState('SPINNING');
+    } else if (state === 'SPINNING') {
+      Physics.stopTurbulence();
+      setState('READY');
+    }
+  }
+
   function handleDraw() {
-    if (state !== 'READY') return;
+    if (state !== 'SPINNING') return;
     const count = parseInt(inputCount.value, 10);
     if (!count || count < 1) return;
 
@@ -121,7 +135,6 @@ const App = (() => {
     if (actualCount === 0) return;
 
     setState('DRAWING');
-    Physics.startTurbulence();
 
     const intervalSec = parseInt(inputInterval.value, 10) || 3;
     let drawn = 0;
@@ -152,13 +165,14 @@ const App = (() => {
     }
 
     function finishDrawing() {
-      Physics.stopTurbulence();
       Physics.closeExitGate();
       const remaining = Physics.getBalls().length;
       if (remaining === 0) {
+        Physics.stopTurbulence();
         setState('COMPLETE');
       } else {
-        setState('READY');
+        // Keep turbulence running, go back to SPINNING
+        setState('SPINNING');
         inputCount.max = remaining;
         if (parseInt(inputCount.value, 10) > remaining) {
           inputCount.value = remaining;
@@ -166,12 +180,17 @@ const App = (() => {
       }
     }
 
-    // 2 seconds turbulence mixing, then start ejection cycle
-    setTimeout(ejectCycle, 2000);
+    // Already spinning, eject immediately
+    ejectCycle();
   }
 
   function handleReset() {
-    if (state === 'IDLE' || state === 'LOADING' || state === 'TURBULENCE' || state === 'DRAWING') return;
+    if (state === 'IDLE' || state === 'LOADING' || state === 'DRAWING') return;
+
+    // Stop turbulence if spinning
+    if (state === 'SPINNING') {
+      Physics.stopTurbulence();
+    }
 
     if (animFrameId) {
       cancelAnimationFrame(animFrameId);
@@ -214,6 +233,7 @@ const App = (() => {
 
   function bindEvents() {
     btnLoad.addEventListener('click', handleLoad);
+    btnSpin.addEventListener('click', handleSpin);
     btnDraw.addEventListener('click', handleDraw);
     btnReset.addEventListener('click', handleReset);
     inputSwirl.addEventListener('input', handleSwirlChange);

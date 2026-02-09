@@ -538,7 +538,7 @@ const Physics = (() => {
     const vortexOffsetX = R * 0.35;
 
     balls.forEach(ball => {
-      if (ball.isExiting && ball.exitPhase !== 'rising') return;
+      if (ball.isExiting) return;
       const dx = ball.position.x - ccx;
       const dy = ball.position.y - ccy;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -635,6 +635,9 @@ const Physics = (() => {
     ball.isExiting = true;
     ball.exitPhase = 'rising';
     ball.exitTimer = 0;
+    // Immediately switch collision so ball passes through other balls
+    ball.collisionFilter = { category: CAT_EXITING, mask: CAT_WALL };
+    ball.frictionAir = 0.02;
     guideBallToExit(ball, callback);
   }
 
@@ -673,9 +676,31 @@ const Physics = (() => {
       ball.exitTimer += 16;
 
       if (ball.exitPhase === 'rising') {
-        const buoyancy = -0.0025;
-        const nudgeX = (exitChannel.x - pos.x) * 0.00008;
-        Body.applyForce(ball, pos, { x: nudgeX, y: buoyancy });
+        // Strong upward buoyancy + horizontal centering toward exit
+        const targetX = exitChannel.x;
+        const targetY = enterY;
+        const dxToExit = targetX - pos.x;
+        const dyToExit = targetY - pos.y;
+
+        // Progressive force: starts gentle, ramps up over time
+        const timeFactor = Math.min(ball.exitTimer / 2000, 1); // 0→1 over 2s
+        const baseUp = 0.004 + timeFactor * 0.004;
+        const baseHorz = 0.0003 + timeFactor * 0.0005;
+
+        Body.applyForce(ball, pos, {
+          x: dxToExit * baseHorz,
+          y: -baseUp
+        });
+
+        // Limit speed so ball rises visibly, not flying off
+        const speed = Math.sqrt(ball.velocity.x ** 2 + ball.velocity.y ** 2);
+        if (speed > 6) {
+          const scale = 6 / speed;
+          Body.setVelocity(ball, {
+            x: ball.velocity.x * scale,
+            y: ball.velocity.y * scale
+          });
+        }
 
         const dx = pos.x - exitChannel.x;
         const dy = pos.y - enterY;
@@ -683,29 +708,14 @@ const Physics = (() => {
 
         if (distToHole < enterRadius) {
           ball.exitPhase = 'entering';
-          ball.collisionFilter = { category: CAT_EXITING, mask: CAT_WALL };
-          ball.frictionAir = 0.02;
           return;
-        }
-        if (ball.exitTimer > 4000) {
-          Body.applyForce(ball, pos, {
-            x: (exitChannel.x - pos.x) * 0.0003,
-            y: -0.004
-          });
-        }
-        if (ball.exitTimer > 6000) {
-          Body.setPosition(ball, { x: exitChannel.x, y: enterY });
-          Body.setVelocity(ball, { x: 0, y: -3 });
-          ball.exitPhase = 'entering';
-          ball.collisionFilter = { category: CAT_EXITING, mask: CAT_WALL };
-          ball.frictionAir = 0.02;
         }
       }
 
       if (ball.exitPhase === 'entering') {
         Body.applyForce(ball, pos, {
-          x: (exitChannel.x - pos.x) * 0.0005,
-          y: -0.005
+          x: (exitChannel.x - pos.x) * 0.001,
+          y: -0.006
         });
         if (pos.y < containerCenter.y - containerRadius - 5) {
           ball.exitPhase = 'upChannel';
@@ -714,8 +724,8 @@ const Physics = (() => {
 
       if (ball.exitPhase === 'upChannel') {
         Body.applyForce(ball, pos, {
-          x: (exitChannel.x - pos.x) * 0.0003,
-          y: -0.005
+          x: (exitChannel.x - pos.x) * 0.001,
+          y: -0.006
         });
         if (pos.y < exitChannel.topY - 30) {
           ball.hasExited = true;
