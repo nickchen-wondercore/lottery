@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>尾牙抽獎</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="main-area">
+      <canvas id="canvas"></canvas>
+      <div id="controls">
+        <button id="btn-load" title="將球放入籤筒">入籤筒</button>
+        <label>
+          數量:
+          <input id="input-count" type="number" min="1" value="1">
+        </label>
+        <button id="btn-draw" disabled title="開始抽籤">抽籤</button>
+        <label>
+          間隔:
+          <input id="input-interval" type="number" min="1" max="10" value="3" step="1"> 秒
+        </label>
+        <label>
+          氣流:
+          <input id="input-swirl" type="number" min="1" max="10" value="5" step="1">
+        </label>
+        <button id="btn-reset" disabled title="重新開始">重置</button>
+      </div>
+    </div>
+    <div id="winner-panel">
+      <h2>中籤名單</h2>
+      <ol id="winner-list"></ol>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
+  <script src="physics.js?v=11"></script>
+  <script src="renderer.js?v=11"></script>
+  <script src="app.js?v=11"></script>
+</body>
+</html>
