@@ -8,6 +8,118 @@ const Renderer = (() => {
   let lidSealed = false;
   let customFontSize = 0;
 
+  // ── Wind particle system ──
+  const WIND_PARTICLE_COUNT = 200;
+  let windParticles = [];
+  let lastFrameTime = 0;
+
+  function spawnWindParticle(center, R) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * R * 0.85;
+    return {
+      x: center.x + Math.cos(angle) * dist,
+      y: center.y + Math.sin(angle) * dist,
+      life: 0,
+      maxLife: 1.5 + Math.random() * 2.0,
+      size: 1.5 + Math.random() * 1.5
+    };
+  }
+
+  function getFlowAt(x, y, center, R) {
+    const vortexOffsetX = R * 0.35;
+    const dx = x - center.x;
+
+    const vdxL = x - (center.x - vortexOffsetX);
+    const vdyL = y - center.y;
+    const vdistL = Math.sqrt(vdxL * vdxL + vdyL * vdyL) || 1;
+    const txL = vdyL / vdistL;
+    const tyL = -vdxL / vdistL;
+
+    const vdxR = x - (center.x + vortexOffsetX);
+    const vdyR = y - center.y;
+    const vdistR = Math.sqrt(vdxR * vdxR + vdyR * vdyR) || 1;
+    const txR = -vdyR / vdistR;
+    const tyR = vdxR / vdistR;
+
+    const blendW = R * 0.1;
+    const blend = Math.min(1, Math.max(0, (dx + blendW) / (2 * blendW)));
+    return {
+      fx: txL * (1 - blend) + txR * blend,
+      fy: tyL * (1 - blend) + tyR * blend
+    };
+  }
+
+  function updateAndDrawWind(dt) {
+    const center = Physics.getContainerCenter();
+    const R = Physics.getContainerRadius();
+    const swirl = Physics.getSwirlMultiplier();
+    const speed = 60 * swirl;
+
+    // Ensure pool is filled
+    while (windParticles.length < WIND_PARTICLE_COUNT) {
+      windParticles.push(spawnWindParticle(center, R));
+    }
+
+    ctx.save();
+
+    // Clip to container circle
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, R - 2, 0, Math.PI * 2);
+    ctx.clip();
+
+    for (let i = 0; i < windParticles.length; i++) {
+      const p = windParticles[i];
+      p.life += dt;
+
+      // Respawn if expired or out of bounds
+      const pdx = p.x - center.x;
+      const pdy = p.y - center.y;
+      if (p.life > p.maxLife || (pdx * pdx + pdy * pdy) > R * R * 0.95) {
+        windParticles[i] = spawnWindParticle(center, R);
+        continue;
+      }
+
+      // Get flow direction and move particle
+      const flow = getFlowAt(p.x, p.y, center, R);
+      const prevX = p.x;
+      const prevY = p.y;
+      p.x += flow.fx * speed * dt;
+      p.y += flow.fy * speed * dt;
+
+      // Fade in/out based on life
+      const lifeRatio = p.life / p.maxLife;
+      let alpha;
+      if (lifeRatio < 0.15) alpha = lifeRatio / 0.15;
+      else if (lifeRatio > 0.75) alpha = (1 - lifeRatio) / 0.25;
+      else alpha = 1;
+      alpha *= 0.55;
+
+      // Draw streak line (extend tail for visible trail)
+      const dx2 = p.x - prevX;
+      const dy2 = p.y - prevY;
+      const streakLen = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      if (streakLen < 0.5) continue;
+
+      const tailX = p.x + dx2 * 2.5;
+      const tailY = p.y + dy2 * 2.5;
+
+      const grad = ctx.createLinearGradient(prevX, prevY, tailX, tailY);
+      grad.addColorStop(0, `rgba(160, 210, 255, 0)`);
+      grad.addColorStop(0.3, `rgba(160, 210, 255, ${alpha})`);
+      grad.addColorStop(1, `rgba(160, 210, 255, ${alpha * 0.3})`);
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = p.size;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(prevX, prevY);
+      ctx.lineTo(tailX, tailY);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
   function init(canvasEl) {
     canvas = canvasEl;
     ctx = canvas.getContext('2d');
@@ -101,12 +213,12 @@ const Renderer = (() => {
     ctx.lineWidth = 6;
     drawArcsWithGaps(center.x, center.y, radius + 3, gaps);
 
-    // Entry gate highlight (when closed)
+    // Entry gate (when closed) — same style as ring
     if (!entryOpen) {
       const ea = Physics.getEntryAngle();
       const entryHalf = Physics.getEntryGapHalfAngle();
-      ctx.strokeStyle = 'rgba(200, 160, 80, 0.25)';
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(150, 200, 255, 0.3)';
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(center.x, center.y, radius, ea - entryHalf, ea + entryHalf);
       ctx.stroke();
@@ -383,11 +495,23 @@ const Renderer = (() => {
   }
 
   function drawFrame() {
+    const now = performance.now() / 1000;
+    const dt = Math.min(now - lastFrameTime, 0.05);
+    lastFrameTime = now;
+
     clear();
     _drawErrors = [];
     safeDraw(drawExitChannel, 'exitCh');
     safeDraw(drawRamps, 'ramps');
     safeDraw(drawContainerFill, 'fill');
+
+    // Wind particles (behind balls, only during turbulence)
+    if (Physics.isTurbulenceActive()) {
+      safeDraw(() => updateAndDrawWind(dt), 'wind');
+    } else if (windParticles.length > 0) {
+      windParticles = [];
+    }
+
     safeDraw(drawBalls, 'balls');
     safeDraw(drawContainerRing, 'ring');
 

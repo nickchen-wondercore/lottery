@@ -224,6 +224,7 @@ const App = (() => {
   async function start() {
     await loadNames();
     bindEvents();
+    handleSwirlChange();
     updateUI();
     drawPreview();
   }

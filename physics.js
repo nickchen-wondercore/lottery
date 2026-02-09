@@ -69,18 +69,18 @@ const Physics = (() => {
     gateTimers.forEach(t => clearTimeout(t));
     gateTimers = [];
 
-    // Container — right portion of canvas
-    containerRadius = Math.min(canvasW * 0.25, canvasH * 0.34);
-    containerCenter = { x: canvasW * 0.6, y: canvasH * 0.58 };
-
-    // Two gaps in container wall
-    exitGapHalfAngle = 0.3;            // top — for exit channel
-    entryAngle = Math.PI + 0.4;        // upper-left entry (no gap below center-left)
-    entryGapHalfAngle = 0.4;           // entry gap spans from π to π+0.8
+    // Container — centered below logo area
+    containerRadius = Math.min(canvasW * 0.25, canvasH * 0.30);
+    containerCenter = { x: canvasW * 0.72, y: canvasH * 0.62 };
 
     // Exit channel — vertical tube above container
     const containerTop = containerCenter.y - containerRadius;
     const channelWidth = Math.max(30, configBallRadius * 2 + 8);
+
+    // Two gaps in container wall (exit gap sized to match channel width)
+    exitGapHalfAngle = Math.asin((channelWidth / 2 + 6) / containerRadius);
+    entryAngle = Math.PI + 0.4;        // upper-left entry (no gap below center-left)
+    entryGapHalfAngle = 0.4;           // entry gap spans from π to π+0.8
     exitChannel = {
       x: containerCenter.x,
       topY: containerTop - Math.min(containerRadius * 0.35, 100),
@@ -530,22 +530,49 @@ const Physics = (() => {
     if (!turbulenceActive) return;
     turbulenceTime += delta;
 
+    const ccx = containerCenter.x;
+    const ccy = containerCenter.y;
+    const R = containerRadius;
+
+    // Twin-vortex centers (left & right halves)
+    const vortexOffsetX = R * 0.35;
+
     balls.forEach(ball => {
       if (ball.isExiting && ball.exitPhase !== 'rising') return;
-      const dx = ball.position.x - containerCenter.x;
-      const dy = ball.position.y - containerCenter.y;
+      const dx = ball.position.x - ccx;
+      const dy = ball.position.y - ccy;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 1) return;
 
       const nx = dx / dist;
       const ny = dy / dist;
 
-      // Clockwise swirl
+      // ── Fountain twin-vortex force ──
+      // Left half: counterclockwise (visual, Y-down coords)
+      // Right half: clockwise (visual, Y-down coords)
       const swirlStrength = 0.0025 * swirlMultiplier;
-      const tx = -ny * swirlStrength;
-      const ty = nx * swirlStrength;
 
-      // Noise perturbation
+      // Left vortex (counterclockwise)
+      const vdxL = ball.position.x - (ccx - vortexOffsetX);
+      const vdyL = ball.position.y - ccy;
+      const vdistL = Math.sqrt(vdxL * vdxL + vdyL * vdyL) || 1;
+      const txL = (vdyL / vdistL) * swirlStrength;
+      const tyL = (-vdxL / vdistL) * swirlStrength;
+
+      // Right vortex (clockwise)
+      const vdxR = ball.position.x - (ccx + vortexOffsetX);
+      const vdyR = ball.position.y - ccy;
+      const vdistR = Math.sqrt(vdxR * vdxR + vdyR * vdyR) || 1;
+      const txR = (-vdyR / vdistR) * swirlStrength;
+      const tyR = (vdxR / vdistR) * swirlStrength;
+
+      // Smooth blend near center line to avoid abrupt flip
+      const blendWidth = R * 0.1;
+      const blend = Math.min(1, Math.max(0, (dx + blendWidth) / (2 * blendWidth)));
+      const tx = txL * (1 - blend) + txR * blend;
+      const ty = tyL * (1 - blend) + tyR * blend;
+
+      // ── Noise perturbation ──
       const t = turbulenceTime * 0.006 * swirlMultiplier;
       const noiseMul = swirlMultiplier;
       const noiseX = (Math.sin(t + ball.seed) * Math.cos(t * 1.7 + ball.seed * 0.7) * 0.002
@@ -553,7 +580,7 @@ const Physics = (() => {
       const noiseY = (Math.cos(t * 1.1 + ball.seed * 1.2) * Math.sin(t * 1.9 + ball.seed) * 0.002
                     + Math.cos(t * 2.7 + ball.seed * 0.8) * 0.001) * noiseMul;
 
-      // Random burst
+      // ── Random burst ──
       let burstX = 0, burstY = 0;
       if (Math.random() < 0.008 * swirlMultiplier) {
         const burstAngle = Math.random() * Math.PI * 2;
@@ -562,21 +589,21 @@ const Physics = (() => {
         burstY = Math.sin(burstAngle) * burstForce;
       }
 
-      // Centering force
-      let cx = 0, cy = 0;
+      // ── Centering force ──
+      let cfx = 0, cfy = 0;
       const edgeRatio = dist / (containerRadius * 0.85);
       if (edgeRatio > 1) {
         const pushStrength = (edgeRatio - 1) * 0.003;
-        cx = -nx * pushStrength;
-        cy = -ny * pushStrength;
+        cfx = -nx * pushStrength;
+        cfy = -ny * pushStrength;
       }
 
       Body.applyForce(ball, ball.position, {
-        x: tx + noiseX + cx + burstX,
-        y: ty + noiseY + cy + burstY
+        x: tx + noiseX + cfx + burstX,
+        y: ty + noiseY + cfy + burstY
       });
 
-      // Speed limiter
+      // ── Speed limiter ──
       const speed = Math.sqrt(ball.velocity.x ** 2 + ball.velocity.y ** 2);
       if (speed > 12) {
         const scale = 12 / speed;
@@ -596,7 +623,15 @@ const Physics = (() => {
       if (callback) callback(null);
       return;
     }
-    const ball = available[Math.floor(Math.random() * available.length)];
+    // Pick the ball closest to the exit opening
+    const exitX = exitChannel.x;
+    const exitY = containerCenter.y - containerRadius;
+    available.sort((a, b) => {
+      const da = (a.position.x - exitX) ** 2 + (a.position.y - exitY) ** 2;
+      const db = (b.position.x - exitX) ** 2 + (b.position.y - exitY) ** 2;
+      return da - db;
+    });
+    const ball = available[0];
     ball.isExiting = true;
     ball.exitPhase = 'rising';
     ball.exitTimer = 0;
@@ -765,6 +800,8 @@ const Physics = (() => {
   function getEntryGateBodies() { return entryGateBodies; }
   function getRampCeilings() { return rampCeilings; }
   function isContainerSealed() { return containerSealed; }
+  function isTurbulenceActive() { return turbulenceActive; }
+  function getSwirlMultiplier() { return swirlMultiplier; }
 
   return {
     init, layout, getEngine, createBalls, openGates, sealContainer,
@@ -775,6 +812,7 @@ const Physics = (() => {
     getExitGapHalfAngle, getEntryGapHalfAngle, getEntryAngle,
     getExitChannel, getRampBodies, getRampGeoms, getRampGates,
     getRampEndWalls, getTransitionGeoms, getEntryGateBodies, getRampCeilings, isContainerSealed,
+    isTurbulenceActive, getSwirlMultiplier,
     CAT_BALL, CAT_WALL, CAT_EXITING
   };
 })();

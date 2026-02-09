@@ -5,7 +5,8 @@
 }
 
 body {
-  background: #1a1a2e;
+  background: #1a1a2e url('background.png') no-repeat center center;
+  background-size: cover;
   color: #e0e0e0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   overflow: hidden;
@@ -27,7 +28,7 @@ body {
 #canvas {
   flex: 1;
   display: block;
-  background: #0f0f23;
+  background: transparent;
 }
 
 #controls {
