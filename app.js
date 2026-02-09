@@ -18,6 +18,7 @@ const App = (() => {
   const inputCount = document.getElementById('input-count');
   const inputInterval = document.getElementById('input-interval');
   const inputSwirl = document.getElementById('input-swirl');
+  const namesList = document.getElementById('names-list');
   const winnerList = document.getElementById('winner-list');
   const canvasEl = document.getElementById('canvas');
   const inputBallSize = document.getElementById('input-ball-size');
@@ -29,8 +30,34 @@ const App = (() => {
       names = await resp.json();
       inputCount.max = names.length;
       inputCount.value = 1;
+      populateNamesList();
     } catch (e) {
       alert('無法載入 names.json：' + e.message);
+    }
+  }
+
+  function populateNamesList() {
+    namesList.innerHTML = '';
+    names.forEach(name => {
+      const li = document.createElement('li');
+      li.dataset.name = name;
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = '🎯'; // 🏆
+      li.appendChild(badge);
+      li.appendChild(document.createTextNode(name));
+      namesList.appendChild(li);
+    });
+  }
+
+  function markWinner(name) {
+    const items = namesList.querySelectorAll('li');
+    for (const li of items) {
+      if (li.dataset.name === name && !li.classList.contains('won')) {
+        li.classList.add('won');
+        li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        break;
+      }
     }
   }
 
@@ -151,6 +178,7 @@ const App = (() => {
 
         drawn++;
         winners.push(name);
+        markWinner(name);
         const li = document.createElement('li');
         li.textContent = name;
         winnerList.appendChild(li);
@@ -180,8 +208,8 @@ const App = (() => {
       }
     }
 
-    // Already spinning, eject immediately
-    ejectCycle();
+    // Delay first ejection 3s to prevent timing manipulation
+    setTimeout(ejectCycle, 3000);
   }
 
   function handleReset() {
@@ -200,6 +228,7 @@ const App = (() => {
 
     winners = [];
     winnerList.innerHTML = '';
+    namesList.querySelectorAll('li.won').forEach(li => li.classList.remove('won'));
 
     Renderer.setEntryOpen(false);
     Renderer.setLidSealed(false);
@@ -238,6 +267,11 @@ const App = (() => {
     btnReset.addEventListener('click', handleReset);
     inputSwirl.addEventListener('input', handleSwirlChange);
     inputFontSize.addEventListener('input', handleFontSizeChange);
+    document.querySelectorAll('.preset-btn[data-ball]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        inputBallSize.value = btn.dataset.ball;
+      });
+    });
     window.addEventListener('resize', handleResize);
   }
 

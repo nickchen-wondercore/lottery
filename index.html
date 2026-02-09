@@ -8,6 +8,10 @@
 </head>
 <body>
   <div id="app">
+    <div id="names-panel">
+      <h2>抽獎名單</h2>
+      <ul id="names-list"></ul>
+    </div>
     <div id="main-area">
       <canvas id="canvas"></canvas>
       <div id="controls">
@@ -29,6 +33,8 @@
         <label>
           球大小:
           <input id="input-ball-size" type="number" min="8" max="50" value="40" step="1">
+          <button type="button" class="preset-btn" data-ball="26" title="總名單用">小</button>
+          <button type="button" class="preset-btn" data-ball="40" title="剩餘名單用">大</button>
         </label>
         <label>
           字大小:
@@ -44,8 +50,8 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
-  <script src="physics.js?v=20"></script>
+  <script src="physics.js?v=25"></script>
   <script src="renderer.js?v=17"></script>
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

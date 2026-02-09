@@ -69,16 +69,45 @@ const Physics = (() => {
     gateTimers.forEach(t => clearTimeout(t));
     gateTimers = [];
 
-    // Container — centered below logo area
-    containerRadius = Math.min(canvasW * 0.25, canvasH * 0.30);
-    containerCenter = { x: canvasW * 0.72, y: canvasH * 0.62 };
+    // ── RWD: compute container position relative to background image ──
+    // Background image (1344×768) is rendered via CSS background-size:cover + center center.
+    // We replicate that math to map an anchor point in the image to screen coords.
+    const BG_W = 1344, BG_H = 768;
+    const vpW = window.innerWidth;
+    const vpH = window.innerHeight;
+    const bgScale = Math.max(vpW / BG_W, vpH / BG_H);
+    const bgDispW = BG_W * bgScale;
+    const bgDispH = BG_H * bgScale;
+    const bgOffX = (vpW - bgDispW) / 2;
+    const bgOffY = (vpH - bgDispH) / 2;
+
+    // Anchor: container center position in the original image (ratio 0-1)
+    const ANCHOR_X = 0.642;   // horizontally aligned with WONDERCORE text
+    const ANCHOR_Y = 0.548;   // vertically below WONDERCORE
+    const RADIUS_R = 0.270;   // radius as ratio of displayed image height
+
+    // Canvas is offset from viewport left by the names-panel
+    // Right panel (winner-panel) is 240px; left panel = remainder
+    const canvasOffX = vpW - canvasW - 240;
+
+    let cx = bgOffX + ANCHOR_X * bgDispW - canvasOffX;
+    let cy = bgOffY + ANCHOR_Y * bgDispH;
+    containerRadius = RADIUS_R * bgDispH;
+
+    // Clamp: ensure container fits within canvas
+    const margin = 15;
+    const maxR = Math.min((canvasW - margin * 2) / 2, (canvasH - margin * 2) / 2);
+    containerRadius = Math.min(containerRadius, maxR);
+    cx = Math.max(containerRadius + margin, Math.min(cx, canvasW - containerRadius - margin));
+    cy = Math.max(containerRadius + margin, Math.min(cy, canvasH - containerRadius - margin));
+    containerCenter = { x: cx, y: cy };
 
     // Exit channel — vertical tube above container
     const containerTop = containerCenter.y - containerRadius;
     const channelWidth = Math.max(30, configBallRadius * 2 + 8);
 
-    // Two gaps in container wall (exit gap sized to match channel width)
-    exitGapHalfAngle = Math.asin((channelWidth / 2 + 6) / containerRadius);
+    // Two gaps in container wall (exit gap accounts for ball radius + wall thickness 20px)
+    exitGapHalfAngle = Math.asin((channelWidth / 2 + 24) / containerRadius);
     entryAngle = Math.PI + 0.4;        // upper-left entry (no gap below center-left)
     entryGapHalfAngle = 0.4;           // entry gap spans from π to π+0.8
     exitChannel = {
@@ -147,7 +176,16 @@ const Physics = (() => {
       collisionFilter: { category: CAT_WALL, mask: CAT_EXITING },
       label: 'exitWall'
     });
-    World.add(world, [leftWall, rightWall]);
+
+    // Stopper at channel entrance: blocks normal balls from floating into the tube,
+    // but exiting balls (CAT_EXITING) pass through
+    const stopper = Bodies.rectangle(exitChannel.x, exitChannel.bottomY, exitChannel.width + 16, 8, {
+      isStatic: true,
+      collisionFilter: { category: CAT_WALL, mask: CAT_BALL },
+      label: 'channelStopper'
+    });
+
+    World.add(world, [leftWall, rightWall, stopper]);
   }
 
   // ───────────── Entry gate (arc segments covering left gap) ─────────────
