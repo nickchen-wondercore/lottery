@@ -63,7 +63,7 @@ lottery/
 ### 狀態機
 
 ```
-IDLE → LOADING → READY ⇄ SPINNING → DRAWING → SPINNING (有剩餘球)
+IDLE → LOADING → READY ⇄ SPINNING → DRAWING → READY (有剩餘球，亂流自動停止)
                                               → COMPLETE (無剩餘球)
 ```
 
@@ -98,6 +98,7 @@ IDLE → LOADING → READY ⇄ SPINNING → DRAWING → SPINNING (有剩餘球)
 
 #### 亂流系統（噴泉式雙渦流）
 - 關閉重力，從底部往上吹
+- **底部噴泉力**：只作用在容器中心線以下的球，力量隨深度線性增強（越底越強，中心線為 0），基礎強度 `0.0035 * swirlMultiplier`
 - 頂部分流：左側逆時針、右側順時針（以容器中心為分割線）
 - 雙渦流中心在 `±containerRadius * 0.35` 處，中線有平滑混合避免突變
 - 搭配噪音擾動 + 隨機爆發力 + 居中力 + 速度限制器

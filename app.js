@@ -199,8 +199,9 @@ const App = (() => {
         Physics.stopTurbulence();
         setState('COMPLETE');
       } else {
-        // Keep turbulence running, go back to SPINNING
-        setState('SPINNING');
+        // Stop turbulence after each batch, user must press 轉動 again
+        Physics.stopTurbulence();
+        setState('READY');
         inputCount.max = remaining;
         if (parseInt(inputCount.value, 10) > remaining) {
           inputCount.value = remaining;

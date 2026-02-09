@@ -636,9 +636,18 @@ const Physics = (() => {
         cfy = -ny * pushStrength;
       }
 
+      // ── Fountain upward force (bottom half only) ──
+      let fountainY = 0;
+      const belowCenter = ball.position.y - ccy;
+      if (belowCenter > 0) {
+        // Strength ramps from 0 at center to max at bottom edge
+        const ratio = Math.min(belowCenter / R, 1);
+        fountainY = -ratio * 0.0035 * swirlMultiplier;
+      }
+
       Body.applyForce(ball, ball.position, {
         x: tx + noiseX + cfx + burstX,
-        y: ty + noiseY + cfy + burstY
+        y: ty + noiseY + cfy + burstY + fountainY
       });
 
       // ── Speed limiter ──
