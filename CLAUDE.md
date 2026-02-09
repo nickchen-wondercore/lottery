@@ -41,9 +41,9 @@ lottery/
 
 | 模組 | 全域物件 | 職責 |
 |------|---------|------|
-| `physics.js` | `Physics` | Matter.js 物理模擬：圓形容器（90段弧牆）、出口管、閘門、channelStopper、球體生成、噴泉式雙渦流亂流、彈射出球、RWD 背景對齊 |
-| `renderer.js` | `Renderer` | Canvas 2D 自訂繪製：分層渲染（出口管 → 容器填充 → 風場粒子 → 球體 → 容器邊框），安全繪製包裝 |
-| `app.js` | `App` | 狀態機控制器（IDLE → LOADING → READY → SPINNING → DRAWING → COMPLETE），UI 綁定、名單面板管理、中獎標記 |
+| `physics.js` | `Physics` | Matter.js 物理模擬：圓形容器、出口管、channelStopper、球體生成、噴泉式雙渦流亂流（拆為子函式）、彈射出球、RWD 背景對齊。頂部定義所有命名常數，提供 `normalizeAngle()`/`angularDistance()`/`limitSpeed()` 工具函式 |
+| `renderer.js` | `Renderer` | Canvas 2D 自訂繪製：分層渲染（出口管 → 容器填充 → 風場粒子 → 球體 → 容器邊框），風場粒子使用 Physics 導出常數（`VORTEX_OFFSET_RATIO` 等）避免跨檔案重複 |
+| `app.js` | `App` | 狀態機控制器（IDLE → LOADING → READY ⇄ SPINNING → DRAWING → READY/COMPLETE），UI 綁定、名單面板管理、中獎標記。`applyUserSettings()` 統一讀取輸入值 |
 
 ### 頁面佈局（三欄）
 
@@ -168,10 +168,12 @@ names.json → fetch → app.js (names[])
 - 修改 `names.json`（JSON 字串陣列）即可自訂抽獎名單
 - 外部依賴僅 Matter.js 0.20.0（CDN 載入），無 npm 依賴
 - 所有 UI 文字為正體中文（台灣）
-- 深色主題樣式定義於 `style.css`
+- 深色主題樣式定義於 `style.css`，顏色統一使用 `:root` CSS 變數（`--color-accent`、`--color-panel` 等）
 - 背景圖為 `background.png`（1344×768），body 使用 `background-size: cover`
 - 修改 `physics.js` 後需更新 `index.html` 的 `?v=N` cache-busting 版號
-- 左側面板 340px、右側面板 240px，若修改需同步更新 `physics.js` 中的 `canvasOffX` 計算（`vpW - canvasW - 右側面板寬度`）
+- 左側面板 340px、右側面板 240px，若修改需同步更新 `physics.js` 的 `RIGHT_PANEL_WIDTH` 常數
+- `physics.js` 所有物理參數集中在頂部常數區（`SWIRL_BASE_STRENGTH`、`FOUNTAIN_BASE_STRENGTH` 等），調參只需改常數
+- `renderer.js` 透過 `Physics.VORTEX_OFFSET_RATIO` 等導出常數取得渦流參數，不再各自硬編碼
 
 ## 維護規範
 

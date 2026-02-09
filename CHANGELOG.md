@@ -6,6 +6,29 @@
 
 ## 2026-02-09
 
+### Refactored
+- **physics.js 重構**（876 行 → 643 行）：
+  - 刪除 4 個死函式：`buildRamps()`、`openGates()`、`startDrawing()`、`ejectNext()` 及所有 ramp 相關變數
+  - 新增工具函式：`normalizeAngle()`、`angularDistance()`、`limitSpeed()`，消除 4+ 處角度計算重複和 2 處速度限制重複
+  - 新增 `createWallSegment()` 共用弧牆段建構，消除 3 處重複
+  - 將 `applyTurbulence()` 拆為 5 個子函式：`calcVortexForce()`、`calcNoiseForce()`、`calcBurstForce()`、`calcCenteringForce()`、`calcFountainForce()`
+  - 所有魔術數字提取為頂部命名常數（30+ 個），包含物理參數、面板寬度、延遲時間等
+  - 導出渦流常數（`VORTEX_OFFSET_RATIO`、`VORTEX_BLEND_RATIO`、`FOUNTAIN_BASE_STRENGTH`）供 renderer 使用
+  - 精簡 Public API：移除未使用的 getter（ramp 系列）、合併 getter 為箭頭函式
+- **renderer.js 重構**（538 行 → 402 行）：
+  - 刪除整個 `drawRamps()` 函式（~110 行，繪製已廢棄的斜坡/天花板/轉接管）
+  - `getFlowAt()` 改用 `Physics.VORTEX_OFFSET_RATIO` / `Physics.VORTEX_BLEND_RATIO`，不再硬編碼
+  - `getFlowAt()` 新增噴泉向上力模擬，風場粒子更準確反映實際氣流
+  - `resize()` 的高度偏移提取為 `CONTROLS_HEIGHT` 常數
+- **style.css 重構**（338 行 → 291 行）：
+  - 新增 `:root` CSS 變數統一 10 個重複顏色值（`--color-accent`、`--color-panel`、`--color-border` 等）
+  - 5 個 input 規則合併為 `#controls input[type="number"]` 一條規則
+  - 兩側面板共用樣式合併為 `#names-panel, #winner-panel` 規則
+  - 兩側 h2 樣式合併、scrollbar 樣式合併
+- **app.js 重構**：
+  - 新增命名常數：`MAX_FRAME_DELTA`、`FIRST_EJECT_DELAY`、`SETTLE_DELAY`、`DEFAULT_BALL_RADIUS`
+  - 新增 `applyUserSettings()` 統一讀取球大小和字大小輸入值，消除 `initPhysicsAndRenderer()` 與 `handleLoad()` 的重複
+
 ### Added
 - **左側抽獎名單面板** — `#names-panel`（340px），顯示所有參與者名字
   - **兩欄佈局**（CSS `columns: 2`），適合 ~50 人名單

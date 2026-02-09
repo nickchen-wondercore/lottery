@@ -1,18 +1,24 @@
 /**
- * renderer.js — 自訂 Canvas 繪製：玻璃球體、球、Z字斜坡、出球管
+ * renderer.js — Canvas 2D 自訂繪製器
+ * 分層渲染順序：出口管 → 容器填充 → 風場粒子 → 球體 → 容器邊框
+ * 不操作 DOM，僅透過 Canvas API 繪製畫面。
  */
 const Renderer = (() => {
   let canvas, ctx;
   let width, height;
-  let entryOpen = false;
-  let lidSealed = false;
-  let customFontSize = 0;
+  let entryOpen = false;    // 入口閘門是否開啟（視覺上不畫該段弧）
+  let lidSealed = false;    // 容器是否已封閉（頂部間隙縮小至出口管寬度）
+  let customFontSize = 0;   // 使用者自訂字大小（0 = 依球大小自動）
 
-  // ── Wind particle system ──
-  const WIND_PARTICLE_COUNT = 200;
+  // ── 風場粒子系統 ──
+  const WIND_PARTICLE_COUNT = 200;  // 粒子數量上限
   let windParticles = [];
   let lastFrameTime = 0;
 
+  // 底部控制列高度（Canvas 需扣除此高度，與 CSS #controls 對應）
+  const CONTROLS_HEIGHT = 55;
+
+  /** 在容器內隨機位置生成一個風場粒子（含生命週期與大小） */
   function spawnWindParticle(center, R) {
     const angle = Math.random() * Math.PI * 2;
     const dist = Math.random() * R * 0.85;
@@ -25,8 +31,13 @@ const Renderer = (() => {
     };
   }
 
+  /**
+   * 計算指定位置的氣流方向向量（用於驅動風場粒子）。
+   * 模擬雙渦流切線力 + 底部噴泉向上力，與 Physics 端的亂流公式一致。
+   * 使用 Physics 導出的常數確保視覺化與實際物理力同步。
+   */
   function getFlowAt(x, y, center, R) {
-    const vortexOffsetX = R * 0.35;
+    const vortexOffsetX = R * Physics.VORTEX_OFFSET_RATIO;
     const dx = x - center.x;
 
     const vdxL = x - (center.x - vortexOffsetX);
@@ -41,28 +52,37 @@ const Renderer = (() => {
     const txR = -vdyR / vdistR;
     const tyR = vdxR / vdistR;
 
-    const blendW = R * 0.1;
+    const blendW = R * Physics.VORTEX_BLEND_RATIO;
     const blend = Math.min(1, Math.max(0, (dx + blendW) / (2 * blendW)));
-    return {
-      fx: txL * (1 - blend) + txR * blend,
-      fy: tyL * (1 - blend) + tyR * blend
-    };
+    let fx = txL * (1 - blend) + txR * blend;
+    let fy = tyL * (1 - blend) + tyR * blend;
+
+    // Fountain upward force (bottom half)
+    const belowCenter = y - center.y;
+    if (belowCenter > 0) {
+      const ratio = Math.min(belowCenter / R, 1);
+      fy -= ratio * 0.5;
+    }
+
+    return { fx, fy };
   }
 
+  /**
+   * 更新風場粒子位置並繪製帶漸層尾跡的粒子線段。
+   * 粒子生命週期：淡入 → 全亮 → 淡出，超時或離開容器則重生。
+   * 僅在亂流啟動時呼叫。
+   */
   function updateAndDrawWind(dt) {
     const center = Physics.getContainerCenter();
     const R = Physics.getContainerRadius();
     const swirl = Physics.getSwirlMultiplier();
     const speed = 60 * swirl;
 
-    // Ensure pool is filled
     while (windParticles.length < WIND_PARTICLE_COUNT) {
       windParticles.push(spawnWindParticle(center, R));
     }
 
     ctx.save();
-
-    // Clip to container circle
     ctx.beginPath();
     ctx.arc(center.x, center.y, R - 2, 0, Math.PI * 2);
     ctx.clip();
@@ -71,7 +91,6 @@ const Renderer = (() => {
       const p = windParticles[i];
       p.life += dt;
 
-      // Respawn if expired or out of bounds
       const pdx = p.x - center.x;
       const pdy = p.y - center.y;
       if (p.life > p.maxLife || (pdx * pdx + pdy * pdy) > R * R * 0.95) {
@@ -79,14 +98,12 @@ const Renderer = (() => {
         continue;
       }
 
-      // Get flow direction and move particle
       const flow = getFlowAt(p.x, p.y, center, R);
       const prevX = p.x;
       const prevY = p.y;
       p.x += flow.fx * speed * dt;
       p.y += flow.fy * speed * dt;
 
-      // Fade in/out based on life
       const lifeRatio = p.life / p.maxLife;
       let alpha;
       if (lifeRatio < 0.15) alpha = lifeRatio / 0.15;
@@ -94,7 +111,6 @@ const Renderer = (() => {
       else alpha = 1;
       alpha *= 0.55;
 
-      // Draw streak line (extend tail for visible trail)
       const dx2 = p.x - prevX;
       const dy2 = p.y - prevY;
       const streakLen = Math.sqrt(dx2 * dx2 + dy2 * dy2);
@@ -120,6 +136,7 @@ const Renderer = (() => {
     ctx.restore();
   }
 
+  /** 初始化 Canvas 上下文並調整尺寸 */
   function init(canvasEl) {
     canvas = canvasEl;
     ctx = canvas.getContext('2d');
@@ -127,10 +144,11 @@ const Renderer = (() => {
     return ctx;
   }
 
+  /** 根據父元素大小重新設定 Canvas 寬高（扣除底部控制列高度） */
   function resize() {
     const rect = canvas.parentElement.getBoundingClientRect();
     width = rect.width;
-    height = rect.height - 55;
+    height = rect.height - CONTROLS_HEIGHT;
     canvas.width = width;
     canvas.height = height;
     return { width, height };
@@ -139,18 +157,20 @@ const Renderer = (() => {
   function setEntryOpen(v) { entryOpen = v; }
   function setLidSealed(v) { lidSealed = v; }
 
+  /** 清空整個 Canvas */
   function clear() {
     ctx.clearRect(0, 0, width, height);
   }
 
-  // ── Glass container: background fill ──
+  // ── 玻璃容器：背景填充 ──
+
+  /** 繪製容器背景：外圈發光暈 + 內部半透明漸層填充，營造玻璃質感 */
   function drawContainerFill() {
     const center = Physics.getContainerCenter();
     const radius = Physics.getContainerRadius();
 
     ctx.save();
 
-    // Outer glow
     const glowGrad = ctx.createRadialGradient(
       center.x, center.y, radius * 0.9,
       center.x, center.y, radius * 1.15
@@ -162,7 +182,6 @@ const Renderer = (() => {
     ctx.arc(center.x, center.y, radius * 1.15, 0, Math.PI * 2);
     ctx.fill();
 
-    // Glass body fill
     const bodyGrad = ctx.createRadialGradient(
       center.x - radius * 0.3, center.y - radius * 0.3, radius * 0.1,
       center.x, center.y, radius
@@ -178,16 +197,19 @@ const Renderer = (() => {
     ctx.restore();
   }
 
-  // ── Glass container: ring with gaps ──
+  // ── 玻璃容器：邊框環（含間隙） ──
+
+  /**
+   * 繪製容器邊框環：主線 + 外暈線 + 高光弧。
+   * 根據 lidSealed / entryOpen 狀態決定頂部和入口間隙大小。
+   * 入口關閉時補畫閘門弧段。
+   */
   function drawContainerRing() {
     const center = Physics.getContainerCenter();
     const radius = Physics.getContainerRadius();
     const ec = Physics.getExitChannel();
 
-    // Build gap list [{center, half}]
     const gaps = [];
-
-    // Top gap
     const topCenter = 3 * Math.PI / 2;
     if (lidSealed) {
       const ecHalf = Math.asin((ec.width / 2 + 10) / radius);
@@ -196,24 +218,20 @@ const Renderer = (() => {
       gaps.push({ center: topCenter, half: Physics.getExitGapHalfAngle() });
     }
 
-    // Entry gap (only when entry is open)
     if (entryOpen) {
       gaps.push({ center: Physics.getEntryAngle(), half: Physics.getEntryGapHalfAngle() });
     }
 
     ctx.save();
 
-    // Glass edge ring
     ctx.strokeStyle = 'rgba(150, 200, 255, 0.3)';
     ctx.lineWidth = 3;
     drawArcsWithGaps(center.x, center.y, radius, gaps);
 
-    // Metal frame ring
     ctx.strokeStyle = 'rgba(180, 190, 210, 0.15)';
     ctx.lineWidth = 6;
     drawArcsWithGaps(center.x, center.y, radius + 3, gaps);
 
-    // Entry gate (when closed) — same style as ring
     if (!entryOpen) {
       const ea = Physics.getEntryAngle();
       const entryHalf = Physics.getEntryGapHalfAngle();
@@ -224,7 +242,6 @@ const Renderer = (() => {
       ctx.stroke();
     }
 
-    // Highlight arc (lower-right area)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -234,6 +251,7 @@ const Renderer = (() => {
     ctx.restore();
   }
 
+  /** 繪製帶有多個間隙的圓弧（將完整圓切成數段，跳過間隙區域） */
   function drawArcsWithGaps(cx, cy, radius, gapDefs) {
     if (gapDefs.length === 0) {
       ctx.beginPath();
@@ -242,18 +260,14 @@ const Renderer = (() => {
       return;
     }
 
-    // Convert to sorted [start, end] ranges
+    const TWO_PI = 2 * Math.PI;
     const gaps = gapDefs.map(g => {
-      let s = g.center - g.half;
-      let e = g.center + g.half;
-      // Normalize to [0, 2π)
-      s = ((s % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-      e = ((e % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      let s = ((g.center - g.half) % TWO_PI + TWO_PI) % TWO_PI;
+      let e = ((g.center + g.half) % TWO_PI + TWO_PI) % TWO_PI;
       return { start: s, end: e };
     });
     gaps.sort((a, b) => a.start - b.start);
 
-    // Draw arcs between gap ends and next gap starts
     for (let i = 0; i < gaps.length; i++) {
       const arcStart = gaps[i].end;
       const arcEnd = gaps[(i + 1) % gaps.length].start;
@@ -263,7 +277,12 @@ const Renderer = (() => {
     }
   }
 
-  // ── Exit channel ──
+  // ── 出口管 ──
+
+  /**
+   * 繪製出口管：半透明背景 + 左右管壁線 + 頂部標記線。
+   * 閘門關閉時額外畫一條金色橫桿。
+   */
   function drawExitChannel() {
     const ec = Physics.getExitChannel();
     const center = Physics.getContainerCenter();
@@ -275,7 +294,6 @@ const Renderer = (() => {
 
     ctx.save();
 
-    // Channel body
     const chanGrad = ctx.createLinearGradient(ec.x - halfW, 0, ec.x + halfW, 0);
     chanGrad.addColorStop(0, 'rgba(100, 130, 180, 0.12)');
     chanGrad.addColorStop(0.5, 'rgba(120, 160, 210, 0.06)');
@@ -283,7 +301,6 @@ const Renderer = (() => {
     ctx.fillStyle = chanGrad;
     ctx.fillRect(ec.x - halfW, topY, halfW * 2, botY - topY);
 
-    // Side walls
     ctx.strokeStyle = 'rgba(150, 180, 220, 0.25)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -293,7 +310,6 @@ const Renderer = (() => {
     ctx.lineTo(ec.x + halfW, botY);
     ctx.stroke();
 
-    // Top opening
     ctx.strokeStyle = 'rgba(255, 200, 100, 0.25)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -301,7 +317,6 @@ const Renderer = (() => {
     ctx.lineTo(ec.x + halfW + 4, topY);
     ctx.stroke();
 
-    // Exit gate visual (gold bar at top of channel)
     if (Physics.isExitGateClosed()) {
       const gateY = ec.topY;
       ctx.fillStyle = '#b08830';
@@ -314,121 +329,13 @@ const Renderer = (() => {
     ctx.restore();
   }
 
-  // ── Ramps & gates ──
-  function drawRamps() {
-    const bodies = Physics.getRampBodies();
-    const geoms = Physics.getRampGeoms();
-    const gates = Physics.getRampGates();
-    const endWalls = Physics.getRampEndWalls();
+  // ── 球體繪製 ──
 
-    ctx.save();
-
-    // Draw ramp surfaces
-    bodies.forEach((ramp, i) => {
-      if (!ramp) return;
-      const g = geoms[i];
-      if (!g) return;
-
-      ctx.save();
-      ctx.translate(ramp.position.x, ramp.position.y);
-      ctx.rotate(ramp.angle);
-
-      const hw = g.length / 2;
-      const hh = 6;
-
-      // Metal ramp surface
-      const rampGrad = ctx.createLinearGradient(0, -hh, 0, hh);
-      rampGrad.addColorStop(0, '#8a9aab');
-      rampGrad.addColorStop(0.5, '#b0c0d0');
-      rampGrad.addColorStop(1, '#6a7a8a');
-      ctx.fillStyle = rampGrad;
-      ctx.fillRect(-hw, -hh, hw * 2, hh * 2);
-
-      // Highlight on top edge
-      ctx.strokeStyle = 'rgba(200, 220, 240, 0.4)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-hw, -hh);
-      ctx.lineTo(hw, -hh);
-      ctx.stroke();
-
-      ctx.restore();
-    });
-
-    // Draw tube ceilings (parallel to ramp floors)
-    const ceilings = Physics.getRampCeilings();
-    ceilings.forEach((ceil, i) => {
-      if (!ceil) return;
-      const g = geoms[i];
-      if (!g) return;
-
-      ctx.save();
-      ctx.translate(ceil.position.x, ceil.position.y);
-      ctx.rotate(ceil.angle);
-
-      const hw = g.length * 0.92 / 2;
-      const hh = 6;
-
-      // Metal ceiling surface (same style as ramp)
-      const ceilGrad = ctx.createLinearGradient(0, -hh, 0, hh);
-      ceilGrad.addColorStop(0, '#6a7a8a');
-      ceilGrad.addColorStop(0.5, '#8a9aab');
-      ceilGrad.addColorStop(1, '#b0c0d0');
-      ctx.fillStyle = ceilGrad;
-      ctx.fillRect(-hw, -hh, hw * 2, hh * 2);
-
-      // Highlight on bottom edge
-      ctx.strokeStyle = 'rgba(200, 220, 240, 0.3)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-hw, hh);
-      ctx.lineTo(hw, hh);
-      ctx.stroke();
-
-      ctx.restore();
-    });
-
-    // Draw gates and end walls (read actual size from physics body bounds)
-    [...gates, ...endWalls].forEach(gate => {
-      if (!gate) return;
-      const bounds = gate.bounds;
-      const gw = bounds.max.x - bounds.min.x;
-      const gh = bounds.max.y - bounds.min.y;
-      ctx.fillStyle = '#b08830';
-      ctx.fillRect(bounds.min.x, bounds.min.y, gw, gh);
-      ctx.strokeStyle = '#d0a848';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(bounds.min.x, bounds.min.y, gw, gh);
-    });
-
-    // Draw transition channels (vertical tubes between ramps)
-    const transitions = Physics.getTransitionGeoms();
-    transitions.forEach(t => {
-      const halfW = t.halfW;
-
-      // Channel body fill
-      const chanGrad = ctx.createLinearGradient(t.x - halfW, 0, t.x + halfW, 0);
-      chanGrad.addColorStop(0, 'rgba(100, 130, 180, 0.15)');
-      chanGrad.addColorStop(0.5, 'rgba(120, 160, 210, 0.06)');
-      chanGrad.addColorStop(1, 'rgba(100, 130, 180, 0.15)');
-      ctx.fillStyle = chanGrad;
-      ctx.fillRect(t.x - halfW, t.topY, halfW * 2, t.botY - t.topY);
-
-      // Side walls
-      ctx.strokeStyle = 'rgba(150, 180, 220, 0.3)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(t.x - halfW, t.topY);
-      ctx.lineTo(t.x - halfW, t.botY);
-      ctx.moveTo(t.x + halfW, t.topY);
-      ctx.lineTo(t.x + halfW, t.botY);
-      ctx.stroke();
-    });
-
-    ctx.restore();
-  }
-
-  // ── Balls ──
+  /**
+   * 繪製所有球體：漸層填充 + 邊框 + 高光 + 名字文字。
+   * 出球中的球體使用較亮的金色配色以示區分。
+   * 文字大小依使用者設定或自動依球體半徑縮放，過寬時逐步縮小。
+   */
   function drawBalls() {
     const balls = Physics.getBalls();
 
@@ -439,7 +346,6 @@ const Renderer = (() => {
       ctx.save();
       ctx.translate(pos.x, pos.y);
 
-      // Ball body gradient
       const grad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
       if (ball.isExiting) {
         grad.addColorStop(0, '#ffe066');
@@ -455,18 +361,15 @@ const Renderer = (() => {
       ctx.arc(0, 0, r, 0, Math.PI * 2);
       ctx.fill();
 
-      // Ball edge
       ctx.strokeStyle = 'rgba(180, 120, 40, 0.6)';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Highlight
       ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
       ctx.beginPath();
       ctx.arc(-r * 0.25, -r * 0.25, r * 0.35, 0, Math.PI * 2);
       ctx.fill();
 
-      // Name text
       const name = ball.name || '';
       const maxWidth = r * 1.6;
       let fontSize = customFontSize > 0 ? customFontSize : Math.max(8, r * 0.7);
@@ -484,9 +387,11 @@ const Renderer = (() => {
     });
   }
 
-  // ── Main draw loop ──
+  // ── 主繪製迴圈 ──
+
   let _drawErrors = [];
 
+  /** 安全執行繪製函式，出錯時記錄錯誤訊息（顯示在 Canvas 左上角） */
   function safeDraw(fn, label) {
     try { fn(); }
     catch (e) {
@@ -494,6 +399,10 @@ const Renderer = (() => {
     }
   }
 
+  /**
+   * 主繪製入口（每幀呼叫一次）：
+   * 清空畫布 → 出口管 → 容器填充 → 風場粒子（亂流時）→ 球體 → 容器邊框
+   */
   function drawFrame() {
     const now = performance.now() / 1000;
     const dt = Math.min(now - lastFrameTime, 0.05);
@@ -502,10 +411,8 @@ const Renderer = (() => {
     clear();
     _drawErrors = [];
     safeDraw(drawExitChannel, 'exitCh');
-    safeDraw(drawRamps, 'ramps');
     safeDraw(drawContainerFill, 'fill');
 
-    // Wind particles (behind balls, only during turbulence)
     if (Physics.isTurbulenceActive()) {
       safeDraw(() => updateAndDrawWind(dt), 'wind');
     } else if (windParticles.length > 0) {
@@ -515,7 +422,6 @@ const Renderer = (() => {
     safeDraw(drawBalls, 'balls');
     safeDraw(drawContainerRing, 'ring');
 
-    // Debug: show errors on canvas
     if (_drawErrors.length > 0) {
       ctx.save();
       ctx.fillStyle = '#ff4444';

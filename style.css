@@ -1,3 +1,16 @@
+:root {
+  --color-bg: #1a1a2e;
+  --color-panel: rgba(22, 33, 62, 0.85);
+  --color-border: #2a2a5a;
+  --color-border-semi: rgba(42, 42, 90, 0.6);
+  --color-accent: #f5a623;
+  --color-input-bg: #0f0f23;
+  --color-input-border: #3a3a6a;
+  --color-text: #e0e0e0;
+  --color-controls-bg: #16213e;
+  --color-item-border: rgba(255, 255, 255, 0.06);
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -5,9 +18,9 @@
 }
 
 body {
-  background: #1a1a2e url('background.png') no-repeat center center;
+  background: var(--color-bg) url('background.png') no-repeat center center;
   background-size: cover;
-  color: #e0e0e0;
+  color: var(--color-text);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   overflow: hidden;
   height: 100vh;
@@ -31,14 +44,16 @@ body {
   background: transparent;
 }
 
+/* ── Controls bar ── */
+
 #controls {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   padding: 14px 16px;
-  background: #16213e;
-  border-top: 1px solid #2a2a5a;
+  background: var(--color-controls-bg);
+  border-top: 1px solid var(--color-border);
   flex-wrap: wrap;
 }
 
@@ -94,13 +109,13 @@ body {
 }
 
 #btn-draw {
-  background: linear-gradient(135deg, #f5a623, #e8891c);
+  background: linear-gradient(135deg, var(--color-accent), #e8891c);
   color: #fff;
   box-shadow: 0 2px 8px rgba(245, 166, 35, 0.3);
 }
 
 #btn-draw:hover:not(:disabled) {
-  background: linear-gradient(135deg, #ffc040, #f5a623);
+  background: linear-gradient(135deg, #ffc040, var(--color-accent));
   box-shadow: 0 4px 16px rgba(245, 166, 35, 0.5);
 }
 
@@ -122,70 +137,22 @@ body {
   gap: 6px;
 }
 
-#input-count {
+/* ── All input fields (unified) ── */
+
+#controls input[type="number"] {
   width: 60px;
   padding: 8px 10px;
   font-size: 15px;
-  border: 1px solid #3a3a6a;
+  border: 1px solid var(--color-input-border);
   border-radius: 6px;
-  background: #0f0f23;
-  color: #e0e0e0;
+  background: var(--color-input-bg);
+  color: var(--color-text);
   text-align: center;
 }
 
-#input-count:focus {
+#controls input[type="number"]:focus {
   outline: none;
-  border-color: #f5a623;
-}
-
-#input-interval {
-  width: 60px;
-  padding: 8px 10px;
-  font-size: 15px;
-  border: 1px solid #3a3a6a;
-  border-radius: 6px;
-  background: #0f0f23;
-  color: #e0e0e0;
-  text-align: center;
-}
-
-#input-interval:focus {
-  outline: none;
-  border-color: #f5a623;
-}
-
-#input-swirl {
-  width: 60px;
-  padding: 8px 10px;
-  font-size: 15px;
-  border: 1px solid #3a3a6a;
-  border-radius: 6px;
-  background: #0f0f23;
-  color: #e0e0e0;
-  text-align: center;
-}
-
-#input-swirl:focus {
-  outline: none;
-  border-color: #f5a623;
-}
-
-#input-ball-size,
-#input-font-size {
-  width: 60px;
-  padding: 8px 10px;
-  font-size: 15px;
-  border: 1px solid #3a3a6a;
-  border-radius: 6px;
-  background: #0f0f23;
-  color: #e0e0e0;
-  text-align: center;
-}
-
-#input-ball-size:focus,
-#input-font-size:focus {
-  outline: none;
-  border-color: #f5a623;
+  border-color: var(--color-accent);
 }
 
 .preset-btn {
@@ -193,8 +160,8 @@ body {
   font-size: 13px !important;
   font-weight: 600 !important;
   border-radius: 4px !important;
-  background: #3a3a6a !important;
-  color: #e0e0e0 !important;
+  background: var(--color-input-border) !important;
+  color: var(--color-text) !important;
   box-shadow: none !important;
 }
 
@@ -202,24 +169,31 @@ body {
   background: #4a4a8a !important;
 }
 
-/* ── Left panel: all names ── */
+/* ── Shared panel styles ── */
 
-#names-panel {
-  width: 340px;
-  background: rgba(22, 33, 62, 0.85);
-  border-right: 1px solid rgba(42, 42, 90, 0.6);
+#names-panel,
+#winner-panel {
+  background: var(--color-panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-#names-panel h2 {
+#names-panel h2,
+#winner-panel h2 {
   text-align: center;
   padding: 16px 12px;
   font-size: 20px;
-  color: #f5a623;
-  border-bottom: 1px solid #2a2a5a;
+  color: var(--color-accent);
+  border-bottom: 1px solid var(--color-border);
   letter-spacing: 2px;
+}
+
+/* ── Left panel: all names ── */
+
+#names-panel {
+  width: 340px;
+  border-right: 1px solid var(--color-border-semi);
 }
 
 #names-list {
@@ -234,7 +208,7 @@ body {
 #names-list li {
   padding: 6px 4px;
   font-size: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--color-item-border);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -258,40 +232,14 @@ body {
 }
 
 #names-list li.won {
-  color: #f5a623;
-}
-
-#names-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-#names-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-#names-list::-webkit-scrollbar-thumb {
-  background: #3a3a6a;
-  border-radius: 3px;
+  color: var(--color-accent);
 }
 
 /* ── Right panel: winners ── */
 
 #winner-panel {
   width: 240px;
-  background: rgba(22, 33, 62, 0.85);
-  border-left: 1px solid rgba(42, 42, 90, 0.6);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-#winner-panel h2 {
-  text-align: center;
-  padding: 16px 12px;
-  font-size: 20px;
-  color: #f5a623;
-  border-bottom: 1px solid #2a2a5a;
-  letter-spacing: 2px;
+  border-left: 1px solid var(--color-border-semi);
 }
 
 #winner-list {
@@ -304,7 +252,7 @@ body {
 #winner-list li {
   padding: 8px 4px;
   font-size: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--color-item-border);
   animation: fadeSlideIn 0.4s ease-out;
 }
 
@@ -323,15 +271,20 @@ body {
   }
 }
 
+/* ── Shared scrollbar ── */
+
+#names-list::-webkit-scrollbar,
 #winner-list::-webkit-scrollbar {
   width: 6px;
 }
 
+#names-list::-webkit-scrollbar-track,
 #winner-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
+#names-list::-webkit-scrollbar-thumb,
 #winner-list::-webkit-scrollbar-thumb {
-  background: #3a3a6a;
+  background: var(--color-input-border);
   border-radius: 3px;
 }
