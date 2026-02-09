@@ -19,6 +19,8 @@ const App = (() => {
   const inputSwirl = document.getElementById('input-swirl');
   const winnerList = document.getElementById('winner-list');
   const canvasEl = document.getElementById('canvas');
+  const inputBallSize = document.getElementById('input-ball-size');
+  const inputFontSize = document.getElementById('input-font-size');
 
   async function loadNames() {
     try {
@@ -41,6 +43,7 @@ const App = (() => {
     btnDraw.disabled = state !== 'READY';
     btnReset.disabled = state === 'IDLE' || state === 'LOADING' || state === 'TURBULENCE' || state === 'DRAWING';
     inputCount.disabled = state !== 'READY' && state !== 'IDLE';
+    inputBallSize.disabled = state !== 'IDLE';
   }
 
   let physicsInited = false;
@@ -51,12 +54,17 @@ const App = (() => {
       physicsInited = true;
     }
     Renderer.init(canvasEl);
+
+    // Read user-configured ball radius and apply before layout
+    ballRadius = parseInt(inputBallSize.value, 10) || 24;
+    Physics.setBallRadius(ballRadius);
+
     const { width, height } = Renderer.getSize();
     Physics.layout(width, height);
 
-    // Ball radius: slightly smaller than exit channel width
-    const channelWidth = Physics.getExitChannel().width;
-    ballRadius = channelWidth / 2 - 4;
+    // Apply font size setting
+    const fontSize = parseInt(inputFontSize.value, 10) || 0;
+    Renderer.setFontSize(fontSize);
   }
 
   // Draw a static preview frame (no animation loop)
@@ -80,6 +88,12 @@ const App = (() => {
   function handleLoad() {
     if (state !== 'IDLE') return;
     setState('LOADING');
+
+    // Re-read ball size and font size before layout
+    ballRadius = parseInt(inputBallSize.value, 10) || 24;
+    Physics.setBallRadius(ballRadius);
+    const fontSize = parseInt(inputFontSize.value, 10) || 0;
+    Renderer.setFontSize(fontSize);
 
     // Re-layout (physics engine already inited in preview)
     const { width, height } = Renderer.getSize();
@@ -185,6 +199,11 @@ const App = (() => {
     Physics.setSwirlMultiplier(val / 10);
   }
 
+  function handleFontSizeChange() {
+    const val = parseInt(inputFontSize.value, 10) || 0;
+    Renderer.setFontSize(val);
+  }
+
   function handleResize() {
     if (state === 'IDLE') {
       drawPreview();
@@ -198,6 +217,7 @@ const App = (() => {
     btnDraw.addEventListener('click', handleDraw);
     btnReset.addEventListener('click', handleReset);
     inputSwirl.addEventListener('input', handleSwirlChange);
+    inputFontSize.addEventListener('input', handleFontSizeChange);
     window.addEventListener('resize', handleResize);
   }
 

@@ -34,10 +34,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 14px 20px;
+  gap: 10px;
+  padding: 14px 16px;
   background: #16213e;
   border-top: 1px solid #2a2a5a;
+  flex-wrap: wrap;
 }
 
 #controls button {
@@ -143,6 +144,24 @@ body {
 }
 
 #input-swirl:focus {
+  outline: none;
+  border-color: #f5a623;
+}
+
+#input-ball-size,
+#input-font-size {
+  width: 60px;
+  padding: 8px 10px;
+  font-size: 15px;
+  border: 1px solid #3a3a6a;
+  border-radius: 6px;
+  background: #0f0f23;
+  color: #e0e0e0;
+  text-align: center;
+}
+
+#input-ball-size:focus,
+#input-font-size:focus {
   outline: none;
   border-color: #f5a623;
 }

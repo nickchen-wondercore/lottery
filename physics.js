@@ -23,6 +23,7 @@ const Physics = (() => {
   let lidBodies = [];          // arc segments sealing top gap
   let containerSealed = false;
   let exitChannel = { x: 0, topY: 0, bottomY: 0, width: 46 };
+  let configBallRadius = 24;
   let turbulenceActive = false;
   let turbulenceTime = 0;
   let turbulenceDirection = 1;
@@ -79,11 +80,12 @@ const Physics = (() => {
 
     // Exit channel — vertical tube above container
     const containerTop = containerCenter.y - containerRadius;
+    const channelWidth = Math.max(30, configBallRadius * 2 + 8);
     exitChannel = {
       x: containerCenter.x,
       topY: containerTop - Math.min(containerRadius * 0.35, 100),
       bottomY: containerTop,
-      width: 56
+      width: channelWidth
     };
 
     buildCircularWall();
@@ -746,6 +748,7 @@ const Physics = (() => {
   // ───────────── Getters ─────────────
 
   function setSwirlMultiplier(v) { swirlMultiplier = v; }
+  function setBallRadius(r) { configBallRadius = r; }
 
   function getBalls() { return balls; }
   function getContainerCenter() { return containerCenter; }
@@ -767,7 +770,7 @@ const Physics = (() => {
     init, layout, getEngine, createBalls, openGates, sealContainer,
     startTurbulence, stopTurbulence, startDrawing, ejectOneBall,
     openExitGate, closeExitGate, isExitGateClosed,
-    setSwirlMultiplier, update, cleanup,
+    setSwirlMultiplier, setBallRadius, update, cleanup,
     getBalls, getContainerCenter, getContainerRadius,
     getExitGapHalfAngle, getEntryGapHalfAngle, getEntryAngle,
     getExitChannel, getRampBodies, getRampGeoms, getRampGates,

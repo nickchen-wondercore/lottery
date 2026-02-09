@@ -19,11 +19,19 @@
         <button id="btn-draw" disabled title="開始抽籤">抽籤</button>
         <label>
           間隔:
-          <input id="input-interval" type="number" min="1" max="10" value="3" step="1"> 秒
+          <input id="input-interval" type="number" min="1" max="10" value="1" step="1"> 秒
         </label>
         <label>
           氣流:
-          <input id="input-swirl" type="number" min="1" max="10" value="5" step="1">
+          <input id="input-swirl" type="number" min="1" max="100" value="40" step="1">
+        </label>
+        <label>
+          球大小:
+          <input id="input-ball-size" type="number" min="8" max="50" value="40" step="1">
+        </label>
+        <label>
+          字大小:
+          <input id="input-font-size" type="number" min="0" max="40" value="40" step="1" title="0 = 自動">
         </label>
         <button id="btn-reset" disabled title="重新開始">重置</button>
       </div>
@@ -35,8 +43,8 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
-  <script src="physics.js?v=11"></script>
-  <script src="renderer.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="physics.js?v=12"></script>
+  <script src="renderer.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

@@ -6,6 +6,7 @@ const Renderer = (() => {
   let width, height;
   let entryOpen = false;
   let lidSealed = false;
+  let customFontSize = 0;
 
   function init(canvasEl) {
     canvas = canvasEl;
@@ -356,9 +357,9 @@ const Renderer = (() => {
       // Name text
       const name = ball.name || '';
       const maxWidth = r * 1.6;
-      let fontSize = Math.max(8, r * 0.7);
+      let fontSize = customFontSize > 0 ? customFontSize : Math.max(8, r * 0.7);
       ctx.font = `bold ${fontSize}px Arial`;
-      while (ctx.measureText(name).width > maxWidth && fontSize > 6) {
+      while (ctx.measureText(name).width > maxWidth && fontSize > 4) {
         fontSize -= 0.5;
         ctx.font = `bold ${fontSize}px Arial`;
       }
@@ -406,5 +407,7 @@ const Renderer = (() => {
     return { width, height };
   }
 
-  return { init, resize, drawFrame, getSize, setLidSealed, setEntryOpen };
+  function setFontSize(size) { customFontSize = size; }
+
+  return { init, resize, drawFrame, getSize, setLidSealed, setEntryOpen, setFontSize };
 })();
