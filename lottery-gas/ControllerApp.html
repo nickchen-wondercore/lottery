@@ -1,0 +1,93 @@
+<script>
+/**
+ * ControllerApp.html — 遙控器控制邏輯
+ * 監聽 Firebase status 更新按鈕狀態，按鈕點擊寫入 Firebase command。
+ * 籤表與數量由 Master 端控制，Controller 只發送動作指令。
+ */
+const ControllerApp = (() => {
+  // ── DOM 元素 ──
+  const btnLoad  = document.getElementById('ctrl-btn-load');
+  const btnSpin  = document.getElementById('ctrl-btn-spin');
+  const btnDraw  = document.getElementById('ctrl-btn-draw');
+  const statusBar    = document.getElementById('status-bar');
+  const statusText   = document.getElementById('status-text');
+
+  let currentState = 'IDLE';
+
+  // ── 狀態文字對應 ──
+  const STATE_LABELS = {
+    IDLE:     '等待入籤筒',
+    LOADING:  '球體載入中...',
+    READY:    '就緒 — 可轉動',
+    SPINNING: '轉動中 — 可抽籤',
+    DRAWING:  '抽籤中...',
+    COMPLETE: '抽獎完成！'
+  };
+
+  // ── 發送 command 到 Firebase ──
+  function sendCommand(action) {
+    const command = {
+      action: action,
+      timestamp: Date.now()
+    };
+    FirebaseDB.commandRef.set(command);
+  }
+
+  // ── 按鈕啟用/禁用邏輯（同 Master updateUI） ──
+  function updateUI(state) {
+    currentState = state;
+
+    // 狀態文字
+    statusText.textContent = STATE_LABELS[state] || state;
+
+    // 按鈕狀態
+    btnLoad.disabled = state !== 'IDLE';
+    btnSpin.disabled = (state !== 'READY' && state !== 'SPINNING');
+    btnSpin.textContent = state === 'SPINNING' ? '停止' : '轉動';
+    btnSpin.classList.toggle('spinning', state === 'SPINNING');
+    btnDraw.disabled = state !== 'SPINNING';
+  }
+
+  // ── 監聽 Firebase status ──
+  function startListeningStatus() {
+    FirebaseDB.statusRef.on('value', snapshot => {
+      const data = snapshot.val();
+      if (!data) return;
+
+      if (data.state) {
+        updateUI(data.state);
+      }
+
+      // 連線成功
+      statusBar.classList.remove('disconnected');
+    });
+
+    // 連線狀態監控
+    const connRef = FirebaseDB.db.ref('.info/connected');
+    connRef.on('value', snap => {
+      if (snap.val() === true) {
+        statusBar.classList.remove('disconnected');
+      } else {
+        statusBar.classList.add('disconnected');
+        statusText.textContent = '連線中斷...';
+      }
+    });
+  }
+
+  // ── 事件綁定 ──
+  function bindEvents() {
+    btnLoad.addEventListener('click', () => sendCommand('LOAD'));
+    btnSpin.addEventListener('click', () => sendCommand('SPIN'));
+    btnDraw.addEventListener('click', () => sendCommand('DRAW'));
+  }
+
+  // ── 啟動 ──
+  function start() {
+    bindEvents();
+    startListeningStatus();
+    updateUI('IDLE');
+  }
+
+  start();
+})();
+</script>

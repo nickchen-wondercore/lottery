@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <base target="_top">
+  <?!= include('Style') ?>
+</head>
+<body data-mode="<?= mode ?>" style="background-image: url('https://nickchen-wondercore.github.io/lottery/background.png')">
+  <div id="app">
+    <div id="names-panel">
+      <h2>抽獎名單</h2>
+      <ul id="names-list"></ul>
+    </div>
+    <div id="main-area">
+      <canvas id="canvas"></canvas>
+      <div id="controls">
+        <label>
+          籤表:
+          <select id="select-sheet"></select>
+        </label>
+        <button id="btn-load" title="將球放入籤筒">入籤筒</button>
+        <label>
+          數量:
+          <input id="input-count" type="number" min="1" value="1">
+        </label>
+        <button id="btn-spin" disabled title="開始轉動球體">轉動</button>
+        <button id="btn-draw" disabled title="抽出球體">抽籤</button>
+        <label>
+          間隔:
+          <input id="input-interval" type="number" min="1" max="10" value="2" step="1"> 秒
+        </label>
+        <label>
+          氣流:
+          <input id="input-swirl" type="number" min="1" max="100" value="75" step="1">
+        </label>
+        <label>
+          球大小:
+          <input id="input-ball-size" type="number" min="8" max="50" value="26" step="1">
+          <button type="button" class="preset-btn" data-ball="26" title="總名單用">小</button>
+          <button type="button" class="preset-btn" data-ball="40" title="剩餘名單用">大</button>
+        </label>
+        <label>
+          字大小:
+          <input id="input-font-size" type="number" min="0" max="40" value="40" step="1" title="0 = 自動">
+        </label>
+        <button id="btn-reset" disabled title="重新開始">重置</button>
+      </div>
+      <div id="viewer-status">
+        <span class="dot"></span>
+        <span id="viewer-status-text">連線中...</span>
+      </div>
+    </div>
+    <div id="winner-panel">
+      <h2>中籤名單</h2>
+      <ol id="winner-list"></ol>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
+  <?!= include('Physics') ?>
+  <?!= include('Renderer') ?>
+  <?!= include('SyncClient') ?>
+  <?!= include('FirebaseConfig') ?>
+  <?!= include('App') ?>
+</body>
+</html>

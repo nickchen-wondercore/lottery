@@ -1,0 +1,146 @@
+<script>
+/**
+ * SyncClient.html — 同步抽象層
+ * Master: push() 封裝 google.script.run.api_pushCommand()
+ * Viewer: startPolling() 定期拉取新指令
+ */
+const Sync = (() => {
+  let lastVersion = 0;
+  let pollingTimer = null;
+  let isPolling = false;
+  let retryCount = 0;
+  const MAX_RETRIES = 5;
+
+  // Polling 間隔依狀態調整
+  const POLL_INTERVALS = {
+    IDLE: 1500,
+    LOADING: 1000,
+    READY: 1500,
+    SPINNING: 800,
+    DRAWING: 500,
+    COMPLETE: 2000
+  };
+
+  let currentState = 'IDLE';
+
+  /**
+   * Master: 推送同步指令
+   * @param {Object} command - { action: string, payload: any }
+   * @return {Promise<number>} 版本號
+   */
+  function push(command) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(version => {
+          lastVersion = version;
+          resolve(version);
+        })
+        .withFailureHandler(err => {
+          console.error('Sync push failed:', err);
+          reject(err);
+        })
+        .api_pushCommand(command);
+    });
+  }
+
+  /**
+   * Viewer: 開始 polling
+   * @param {Function} onCommands - 收到新指令時的回呼 fn(commands)
+   * @param {Function} onFirstSync - 首次同步完成（含快照）的回呼 fn(snapshot)
+   * @param {Function} onError - 錯誤回呼（可選）
+   */
+  function startPolling(onCommands, onFirstSync, onError) {
+    if (pollingTimer) return;
+    isPolling = true;
+    retryCount = 0;
+
+    function poll() {
+      if (!isPolling) return;
+
+      google.script.run
+        .withSuccessHandler(result => {
+          retryCount = 0;
+
+          if (result.snapshot && lastVersion === 0) {
+            // 首次連線，收到狀態快照 — 跳過歷史指令，直接用快照恢復
+            lastVersion = result.version;
+            if (onFirstSync) onFirstSync(result.snapshot);
+          } else if (result.commands && result.commands.length > 0) {
+            // 後續 polling — 只處理新指令
+            lastVersion = result.version;
+            if (onCommands) onCommands(result.commands);
+          }
+
+          scheduleNext();
+        })
+        .withFailureHandler(err => {
+          console.error('Sync poll failed:', err);
+          retryCount++;
+          if (retryCount > MAX_RETRIES) {
+            if (onError) onError('連線中斷，已重試 ' + MAX_RETRIES + ' 次');
+            // 繼續嘗試但降低頻率
+            retryCount = 0;
+          }
+          scheduleNext(3000); // 錯誤時等久一點
+        })
+        .api_getSyncState(lastVersion);
+    }
+
+    function scheduleNext(overrideMs) {
+      if (!isPolling) return;
+      const ms = overrideMs || POLL_INTERVALS[currentState] || 1500;
+      pollingTimer = setTimeout(poll, ms);
+    }
+
+    // 首次立即 poll
+    poll();
+  }
+
+  /** 停止 polling */
+  function stopPolling() {
+    isPolling = false;
+    if (pollingTimer) {
+      clearTimeout(pollingTimer);
+      pollingTimer = null;
+    }
+  }
+
+  /** 更新目前狀態（用於調整 polling 間隔） */
+  function setState(state) {
+    currentState = state;
+  }
+
+  /** 清除同步狀態 */
+  function clearSync() {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(() => {
+          lastVersion = 0;
+          resolve();
+        })
+        .withFailureHandler(reject)
+        .api_clearSync();
+    });
+  }
+
+  /** 取得目前版本號 */
+  function getVersion() {
+    return lastVersion;
+  }
+
+  /** 重置本地版本號（用於 reset） */
+  function resetVersion() {
+    lastVersion = 0;
+  }
+
+  return {
+    push,
+    startPolling,
+    stopPolling,
+    setState,
+    clearSync,
+    getVersion,
+    resetVersion
+  };
+})();
+</script>

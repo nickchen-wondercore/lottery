@@ -4,6 +4,63 @@
 
 ---
 
+## 2026-02-10
+
+### Added — Firebase 遙控器（Controller）
+- **Controller 頁面** — `?mode=controller` 獨立遙控器頁面，適合手機/平板觸控操作
+  - `ControllerIndex.html`：頁面模板（背景圖 + 毛玻璃控制面板 + 中獎名單）
+  - `ControllerStyle.html`：觸控友善大按鈕（紅/綠/金/灰）+ 按下縮放動畫 + 發光脈衝效果
+  - `ControllerApp.html`：監聽 Firebase `lottery/status` 更新 UI，按鈕點擊寫入 Firebase `lottery/command`
+  - 籤表與數量由 Master 端控制，Controller 只發送動作指令（不帶參數）
+- **FirebaseConfig.html** — Firebase RTDB SDK v10 compat 載入 + 初始化，導出 `FirebaseDB` 全域物件
+  - 使用者需填入自己的 Firebase config（apiKey, databaseURL 等）
+- **Firebase RTDB 雙向通訊**：
+  - Controller → Master：寫入 `lottery/command`（action + timestamp）
+  - Master → Controller：每次 `setState()` 寫入 `lottery/status`（state, winners, remaining）
+  - timestamp 比對防止重複執行
+- **雙控模式** — Master 本機按鈕與 Controller 遙控器可同時操作
+
+### Changed
+- `Code.gs`：`doGet()` 新增 `controller` mode 路由，載入 `ControllerIndex.html` 模板
+- `Index.html`：引入 `FirebaseConfig.html`（Master 頁面載入 Firebase SDK）
+- `App.html`：
+  - 新增 `writeFirebaseStatus()` — 每次 `setState()` 同步寫入 Firebase status
+  - 新增 `startFirebaseCommandListener()` — Master 監聽 Firebase command，分發至 `handleLoad/Spin/Draw/Reset`
+  - Master 啟動時寫入初始 status + 開始監聽 Firebase command
+  - 籤表與數量由 Master 端控制，Controller 只發送純動作指令
+
+---
+
+## 2026-02-09 (v2)
+
+### Added — Google Apps Script 版（`lottery-gas/`）
+- **Google Sheets 整合** — 名單、設定、中獎紀錄三個 Sheet 取代 `names.json`
+  - `SheetService.gs`：CRUD 操作（getNames / getAllNamesWithStatus / getSettings / recordWinner / recordWinnerBatch / resetWinners）
+  - 中獎時自動標記名單 Sheet Column B 為 TRUE + 寫入中獎紀錄 Sheet
+- **多螢幕同步** — Master/Viewer 雙模式架構
+  - `SyncService.gs`：CacheService 同步機制 + LockService 防衝突
+  - `SyncClient.html`：Master `push()` / Viewer `startPolling()` 抽象層
+  - 同步指令：INIT / SEALED / START_TURBULENCE / STOP_TURBULENCE / DRAW_START / EJECT / BATCH_DONE / RESET
+  - Polling 間隔依狀態調整（500-1500ms）
+- **Viewer 模式** — 唯讀同步觀看，無操作按鈕
+  - 出球隊列（ejectQueue）：確保逐一處理 EJECT 指令
+  - 中途加入恢復（Late-Join Recovery）：首次 polling 收到完整快照，快進建立剩餘球體
+  - `#viewer-status` 狀態提示 bar（含連線指示燈）
+- **`ejectSpecificBall(name, callback)`** — Physics 新增按名稱出球函式，Viewer 端使用
+- **GAS 模板系統** — `Index.html` 使用 `include()` 組裝所有前端模組
+  - `Code.gs`：doGet() 入口 + include() helper + api_*() 前端 API
+  - `Style.html`：背景圖 URL 改用 GAS template 注入
+
+### Changed
+- `App.html` 從 `app.js` 大幅改寫：
+  - `loadNames()` 改用 `google.script.run.api_getAllNamesWithStatus()`
+  - 設定讀取改用 `google.script.run.api_getSettings()`
+  - Master 每個動作後呼叫 `Sync.push(command)`
+  - 中獎記錄改用 `google.script.run.api_recordWinner()` 回寫 Sheets
+- Viewer 模式隱藏 `#controls`，顯示 `#viewer-status` 狀態提示
+
+---
+
 ## 2026-02-09
 
 ### Refactored

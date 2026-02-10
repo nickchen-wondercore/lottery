@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <base target="_top">
+  <?!= include('ControllerStyle') ?>
+</head>
+<body style="background-image: url('https://nickchen-wondercore.github.io/lottery/background.png')">
+  <div id="controller-app">
+    <!-- 狀態指示 -->
+    <div id="status-bar">
+      <span class="dot"></span>
+      <span id="status-text">連線中...</span>
+    </div>
+
+    <!-- 控制面板 -->
+    <div id="control-panel">
+      <h1>抽獎遙控器</h1>
+
+      <!-- 主要按鈕 -->
+      <div class="btn-group">
+        <button id="ctrl-btn-load" class="ctrl-btn btn-load">入籤筒</button>
+        <button id="ctrl-btn-spin" class="ctrl-btn btn-spin" disabled>轉動</button>
+        <button id="ctrl-btn-draw" class="ctrl-btn btn-draw" disabled>抽籤</button>
+      </div>
+    </div>
+  </div>
+
+  <?!= include('FirebaseConfig') ?>
+  <?!= include('ControllerApp') ?>
+</body>
+</html>

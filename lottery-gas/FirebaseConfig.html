@@ -1,0 +1,33 @@
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<script>
+/**
+ * FirebaseConfig.html — Firebase RTDB 初始化（共用模組）
+ * Master 與 Controller 皆引入此模組。
+ *
+ * ★ 使用前請填入你的 Firebase 專案設定 ★
+ */
+const FirebaseDB = (() => {
+  // ── 請填入你的 Firebase config ──
+  const firebaseConfig = {
+    apiKey:            'YOUR_API_KEY',
+    authDomain:        'YOUR_PROJECT.firebaseapp.com',
+    databaseURL:       'https://YOUR_PROJECT-default-rtdb.firebaseio.com',
+    projectId:         'YOUR_PROJECT',
+    storageBucket:     'YOUR_PROJECT.appspot.com',
+    messagingSenderId: 'YOUR_SENDER_ID',
+    appId:             'YOUR_APP_ID'
+  };
+
+  // 初始化 Firebase
+  if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+  }
+
+  const db = firebase.database();
+  const commandRef = db.ref('lottery/command');
+  const statusRef  = db.ref('lottery/status');
+
+  return { db, commandRef, statusRef };
+})();
+</script>

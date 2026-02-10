@@ -1,0 +1,635 @@
+<script>
+/**
+ * Physics.html — Matter.js 物理引擎：圓形邊界、亂流、出球機制
+ * 從 physics.js 遷移，新增 ejectSpecificBall() 供 Viewer 端使用。
+ */
+const Physics = (() => {
+  const { Engine, World, Bodies, Body } = Matter;
+
+  // ───────────── 碰撞分類遮罩 ─────────────
+  const CAT_BALL = 0x0001;
+  const CAT_WALL = 0x0002;
+  const CAT_EXITING = 0x0004;
+
+  // ── 背景圖 RWD 定位參數 ──
+  const BG_W = 1344;
+  const BG_H = 768;
+  const ANCHOR_X = 0.642;
+  const ANCHOR_Y = 0.548;
+  const RADIUS_RATIO = 0.270;
+  const RIGHT_PANEL_WIDTH = 240;
+
+  // ── 圓弧牆參數 ──
+  const WALL_SEGMENTS = 90;
+  const WALL_THICKNESS = 20;
+  const EXIT_GAP_MARGIN = 24;
+
+  // ── 亂流物理參數 ──
+  const VORTEX_OFFSET_RATIO = 0.35;
+  const VORTEX_BLEND_RATIO = 0.1;
+  const SWIRL_BASE_STRENGTH = 0.0025;
+  const FOUNTAIN_BASE_STRENGTH = 0.0035;
+  const NOISE_TIME_SCALE = 0.006;
+  const BURST_PROBABILITY = 0.008;
+  const BURST_FORCE_MIN = 0.005;
+  const BURST_FORCE_RANGE = 0.005;
+  const CENTERING_EDGE_RATIO = 0.85;
+  const CENTERING_STRENGTH = 0.003;
+  const TURBULENCE_SPEED_LIMIT = 12;
+
+  // ── 出球引導力參數 ──
+  const RISING_SPEED_LIMIT = 6;
+  const RISING_FORCE_BASE = 0.004;
+  const RISING_FORCE_RAMP = 0.004;
+  const RISING_HORZ_BASE = 0.0003;
+  const RISING_HORZ_RAMP = 0.0005;
+  const RISING_RAMP_DURATION = 2000;
+  const CHANNEL_FORCE_HORZ = 0.001;
+  const CHANNEL_FORCE_UP = 0.006;
+
+  // ── 邊界強制修正 ──
+  const BOUNDARY_HARD_RATIO = 0.92;
+  const BOUNDARY_TELEPORT_RATIO = 0.8;
+  const RESCUE_THRESHOLD_RATIO = 0.9;
+
+  // ── 球體生成 ──
+  const BALL_SPAWN_INTERVAL = 80;
+
+  // ───────────── 模組狀態 ─────────────
+  let engine, world;
+  let containerCenter = { x: 0, y: 0 };
+  let containerRadius = 0;
+  let exitGapHalfAngle = 0;
+  let entryGapHalfAngle = 0;
+  let entryAngle = Math.PI;
+  let balls = [];
+  let wallBodies = [];
+  let entryGateBodies = [];
+  let lidBodies = [];
+  let containerSealed = false;
+  let exitChannel = { x: 0, topY: 0, bottomY: 0, width: 46 };
+  let configBallRadius = 24;
+  let turbulenceActive = false;
+  let turbulenceTime = 0;
+  let swirlMultiplier = 1.0;
+  let exitGateBody = null;
+  let gateTimers = [];
+  let ballCreationInterval = null;
+
+  // ───────────── 工具函式 ─────────────
+
+  function normalizeAngle(angle) {
+    return ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  }
+
+  function angularDistance(a, b) {
+    let d = Math.abs(normalizeAngle(a) - normalizeAngle(b));
+    return d > Math.PI ? 2 * Math.PI - d : d;
+  }
+
+  function limitSpeed(ball, maxSpeed) {
+    const speed = Math.sqrt(ball.velocity.x ** 2 + ball.velocity.y ** 2);
+    if (speed > maxSpeed) {
+      const scale = maxSpeed / speed;
+      Body.setVelocity(ball, {
+        x: ball.velocity.x * scale,
+        y: ball.velocity.y * scale
+      });
+    }
+  }
+
+  // ───────────── 初始化 ─────────────
+
+  function init() {
+    engine = Engine.create({
+      gravity: { x: 0, y: 1, scale: 0.001 },
+      positionIterations: 10,
+      velocityIterations: 10
+    });
+    world = engine.world;
+  }
+
+  // ───────────── 版面配置 ─────────────
+
+  function layout(canvasW, canvasH) {
+    World.clear(world, false);
+    balls = [];
+    wallBodies = [];
+    entryGateBodies = [];
+    lidBodies = [];
+    containerSealed = false;
+    exitGateBody = null;
+    gateTimers.forEach(t => clearTimeout(t));
+    gateTimers = [];
+
+    const vpW = window.innerWidth;
+    const vpH = window.innerHeight;
+    const bgScale = Math.max(vpW / BG_W, vpH / BG_H);
+    const bgDispW = BG_W * bgScale;
+    const bgDispH = BG_H * bgScale;
+    const bgOffX = (vpW - bgDispW) / 2;
+    const bgOffY = (vpH - bgDispH) / 2;
+
+    const canvasOffX = vpW - canvasW - RIGHT_PANEL_WIDTH;
+
+    let cx = bgOffX + ANCHOR_X * bgDispW - canvasOffX;
+    let cy = bgOffY + ANCHOR_Y * bgDispH;
+    containerRadius = RADIUS_RATIO * bgDispH;
+
+    const margin = 15;
+    const maxR = Math.min((canvasW - margin * 2) / 2, (canvasH - margin * 2) / 2);
+    containerRadius = Math.min(containerRadius, maxR);
+    cx = Math.max(containerRadius + margin, Math.min(cx, canvasW - containerRadius - margin));
+    cy = Math.max(containerRadius + margin, Math.min(cy, canvasH - containerRadius - margin));
+    containerCenter = { x: cx, y: cy };
+
+    const containerTop = containerCenter.y - containerRadius;
+    const channelWidth = Math.max(30, configBallRadius * 2 + 8);
+
+    exitGapHalfAngle = Math.asin((channelWidth / 2 + EXIT_GAP_MARGIN) / containerRadius);
+    entryAngle = Math.PI + 0.4;
+    entryGapHalfAngle = 0.4;
+    exitChannel = {
+      x: containerCenter.x,
+      topY: containerTop - Math.min(containerRadius * 0.35, 100),
+      bottomY: containerTop,
+      width: channelWidth
+    };
+
+    buildCircularWall();
+    buildExitChannelWalls();
+    buildEntryGate();
+    buildExitGate();
+  }
+
+  // ───────────── 弧牆段建構器 ─────────────
+
+  function createWallSegment(angle, label, collisionMask) {
+    const segLen = (2 * Math.PI * containerRadius) / WALL_SEGMENTS;
+    const x = containerCenter.x + containerRadius * Math.cos(angle);
+    const y = containerCenter.y + containerRadius * Math.sin(angle);
+    return Bodies.rectangle(x, y, segLen + 6, WALL_THICKNESS, {
+      isStatic: true,
+      angle: angle + Math.PI / 2,
+      collisionFilter: { category: CAT_WALL, mask: collisionMask },
+      label
+    });
+  }
+
+  function buildCircularWall() {
+    const exitCenter = 3 * Math.PI / 2;
+    for (let i = 0; i < WALL_SEGMENTS; i++) {
+      const angle = (2 * Math.PI * i) / WALL_SEGMENTS;
+      if (angularDistance(angle, exitCenter) < exitGapHalfAngle) continue;
+      if (angularDistance(angle, entryAngle) < entryGapHalfAngle) continue;
+      wallBodies.push(createWallSegment(angle, 'wall', CAT_BALL | CAT_EXITING));
+    }
+    World.add(world, wallBodies);
+  }
+
+  function buildExitChannelWalls() {
+    const halfW = exitChannel.width / 2;
+    const height = exitChannel.bottomY - exitChannel.topY;
+    const midY = (exitChannel.topY + exitChannel.bottomY) / 2;
+
+    const leftWall = Bodies.rectangle(exitChannel.x - halfW - 4, midY, 8, height, {
+      isStatic: true,
+      collisionFilter: { category: CAT_WALL, mask: CAT_EXITING },
+      label: 'exitWall'
+    });
+    const rightWall = Bodies.rectangle(exitChannel.x + halfW + 4, midY, 8, height, {
+      isStatic: true,
+      collisionFilter: { category: CAT_WALL, mask: CAT_EXITING },
+      label: 'exitWall'
+    });
+    const stopper = Bodies.rectangle(exitChannel.x, exitChannel.bottomY, exitChannel.width + 16, 8, {
+      isStatic: true,
+      collisionFilter: { category: CAT_WALL, mask: CAT_BALL },
+      label: 'channelStopper'
+    });
+    World.add(world, [leftWall, rightWall, stopper]);
+  }
+
+  function buildEntryGate() {
+    for (let i = 0; i < WALL_SEGMENTS; i++) {
+      const angle = (2 * Math.PI * i) / WALL_SEGMENTS;
+      if (angularDistance(angle, entryAngle) >= entryGapHalfAngle) continue;
+      entryGateBodies.push(createWallSegment(angle, 'entryGate', CAT_BALL | CAT_EXITING));
+    }
+    World.add(world, entryGateBodies);
+  }
+
+  function buildExitGate() {
+    if (exitGateBody) return;
+    exitGateBody = Bodies.rectangle(
+      exitChannel.x, exitChannel.topY, exitChannel.width + 16, 8,
+      {
+        isStatic: true,
+        collisionFilter: { category: CAT_WALL, mask: CAT_EXITING },
+        label: 'exitGate'
+      }
+    );
+    World.add(world, exitGateBody);
+  }
+
+  function openExitGate() {
+    if (exitGateBody) {
+      World.remove(world, exitGateBody);
+      exitGateBody = null;
+    }
+  }
+
+  function closeExitGate() {
+    if (!exitGateBody) buildExitGate();
+  }
+
+  function isExitGateClosed() {
+    return exitGateBody !== null;
+  }
+
+  // ───────────── 球體生成 ─────────────
+
+  function createBalls(names, ballRadius, onAllCreated) {
+    balls = [];
+    const spawnX = containerCenter.x;
+    const spawnY = containerCenter.y - containerRadius * 0.5;
+
+    let idx = 0;
+    ballCreationInterval = setInterval(() => {
+      if (idx >= names.length) {
+        clearInterval(ballCreationInterval);
+        ballCreationInterval = null;
+        if (onAllCreated) onAllCreated();
+        return;
+      }
+
+      const ball = Bodies.circle(
+        spawnX + (Math.random() - 0.5) * containerRadius * 0.8,
+        spawnY,
+        ballRadius,
+        {
+          restitution: 0.3,
+          friction: 0.05,
+          frictionAir: 0.01,
+          density: 0.002,
+          slop: 0.01,
+          collisionFilter: { category: CAT_BALL, mask: CAT_BALL | CAT_WALL },
+          label: 'ball'
+        }
+      );
+      ball.name = names[idx];
+      ball.ballRadius = ballRadius;
+      ball.seed = Math.random() * 1000;
+      balls.push(ball);
+      World.add(world, [ball]);
+      idx++;
+    }, BALL_SPAWN_INTERVAL);
+
+    return balls;
+  }
+
+  // ───────────── 容器封閉 ─────────────
+
+  function sealContainer() {
+    engine.gravity.scale = 0.001;
+    balls.forEach(ball => {
+      ball.friction = 0.1;
+      ball.frictionAir = 0.01;
+      ball.restitution = 0.4;
+    });
+
+    if (entryGateBodies.length === 0) buildEntryGate();
+
+    if (lidBodies.length === 0) {
+      const exitCenter = 3 * Math.PI / 2;
+      const exitHalfAngle = Math.asin((exitChannel.width / 2 + 10) / containerRadius);
+
+      for (let i = 0; i < WALL_SEGMENTS; i++) {
+        const angle = (2 * Math.PI * i) / WALL_SEGMENTS;
+        const distFromTop = angularDistance(angle, exitCenter);
+        if (distFromTop >= exitGapHalfAngle) continue;
+        if (distFromTop < exitHalfAngle) continue;
+        lidBodies.push(createWallSegment(angle, 'lid', CAT_BALL | CAT_EXITING));
+      }
+      World.add(world, lidBodies);
+    }
+
+    containerSealed = true;
+    rescueEscapedBalls();
+  }
+
+  function rescueEscapedBalls() {
+    const safeRadius = containerRadius * 0.7;
+    balls.forEach(ball => {
+      if (ball.isExiting || ball.hasExited) return;
+      const dx = ball.position.x - containerCenter.x;
+      const dy = ball.position.y - containerCenter.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > containerRadius * RESCUE_THRESHOLD_RATIO) {
+        const randAngle = Math.random() * Math.PI * 2;
+        const randDist = Math.random() * safeRadius * 0.6;
+        Body.setPosition(ball, {
+          x: containerCenter.x + randDist * Math.cos(randAngle),
+          y: containerCenter.y + randDist * Math.sin(randAngle)
+        });
+        Body.setVelocity(ball, { x: 0, y: 0 });
+      }
+    });
+  }
+
+  // ───────────── 亂流系統 ─────────────
+
+  function startTurbulence() {
+    turbulenceActive = true;
+    turbulenceTime = 0;
+    engine.gravity.y = 0;
+    engine.gravity.scale = 0;
+
+    balls.forEach(ball => {
+      if (ball.isExiting) return;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = (1.5 + Math.random() * 2) * swirlMultiplier;
+      Body.setVelocity(ball, {
+        x: Math.cos(angle) * speed,
+        y: Math.sin(angle) * speed
+      });
+      ball.frictionAir = 0.005;
+      ball.restitution = 0.9;
+    });
+  }
+
+  function stopTurbulence() {
+    turbulenceActive = false;
+    engine.gravity.y = 1;
+    engine.gravity.scale = 0.001;
+    balls.forEach(ball => {
+      if (ball.isExiting) return;
+      ball.frictionAir = 0.01;
+      ball.restitution = 0.4;
+    });
+  }
+
+  function calcVortexForce(ballX, ballY, ccx, ccy, R) {
+    const vortexOffsetX = R * VORTEX_OFFSET_RATIO;
+    const dx = ballX - ccx;
+    const strength = SWIRL_BASE_STRENGTH * swirlMultiplier;
+
+    const vdxL = ballX - (ccx - vortexOffsetX);
+    const vdyL = ballY - ccy;
+    const vdistL = Math.sqrt(vdxL * vdxL + vdyL * vdyL) || 1;
+    const txL = (vdyL / vdistL) * strength;
+    const tyL = (-vdxL / vdistL) * strength;
+
+    const vdxR = ballX - (ccx + vortexOffsetX);
+    const vdyR = ballY - ccy;
+    const vdistR = Math.sqrt(vdxR * vdxR + vdyR * vdyR) || 1;
+    const txR = (-vdyR / vdistR) * strength;
+    const tyR = (vdxR / vdistR) * strength;
+
+    const blendWidth = R * VORTEX_BLEND_RATIO;
+    const blend = Math.min(1, Math.max(0, (dx + blendWidth) / (2 * blendWidth)));
+    return {
+      x: txL * (1 - blend) + txR * blend,
+      y: tyL * (1 - blend) + tyR * blend
+    };
+  }
+
+  function calcNoiseForce(seed) {
+    const t = turbulenceTime * NOISE_TIME_SCALE * swirlMultiplier;
+    const mul = swirlMultiplier;
+    return {
+      x: (Math.sin(t + seed) * Math.cos(t * 1.7 + seed * 0.7) * 0.002
+         + Math.sin(t * 2.3 + seed * 1.5) * 0.001) * mul,
+      y: (Math.cos(t * 1.1 + seed * 1.2) * Math.sin(t * 1.9 + seed) * 0.002
+         + Math.cos(t * 2.7 + seed * 0.8) * 0.001) * mul
+    };
+  }
+
+  function calcBurstForce() {
+    if (Math.random() >= BURST_PROBABILITY * swirlMultiplier) return { x: 0, y: 0 };
+    const angle = Math.random() * Math.PI * 2;
+    const force = (BURST_FORCE_MIN + Math.random() * BURST_FORCE_RANGE) * swirlMultiplier;
+    return { x: Math.cos(angle) * force, y: Math.sin(angle) * force };
+  }
+
+  function calcCenteringForce(nx, ny, dist) {
+    const edgeRatio = dist / (containerRadius * CENTERING_EDGE_RATIO);
+    if (edgeRatio <= 1) return { x: 0, y: 0 };
+    const push = (edgeRatio - 1) * CENTERING_STRENGTH;
+    return { x: -nx * push, y: -ny * push };
+  }
+
+  function calcFountainForce(ballY, ccy, R) {
+    const belowCenter = ballY - ccy;
+    if (belowCenter <= 0) return 0;
+    const ratio = Math.min(belowCenter / R, 1);
+    return -ratio * FOUNTAIN_BASE_STRENGTH * swirlMultiplier;
+  }
+
+  function applyTurbulence(delta) {
+    if (!turbulenceActive) return;
+    turbulenceTime += delta;
+
+    const ccx = containerCenter.x;
+    const ccy = containerCenter.y;
+    const R = containerRadius;
+
+    balls.forEach(ball => {
+      if (ball.isExiting) return;
+      const dx = ball.position.x - ccx;
+      const dy = ball.position.y - ccy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) return;
+
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      const vortex = calcVortexForce(ball.position.x, ball.position.y, ccx, ccy, R);
+      const noise = calcNoiseForce(ball.seed);
+      const burst = calcBurstForce();
+      const centering = calcCenteringForce(nx, ny, dist);
+      const fountainY = calcFountainForce(ball.position.y, ccy, R);
+
+      Body.applyForce(ball, ball.position, {
+        x: vortex.x + noise.x + centering.x + burst.x,
+        y: vortex.y + noise.y + centering.y + burst.y + fountainY
+      });
+
+      limitSpeed(ball, TURBULENCE_SPEED_LIMIT);
+    });
+  }
+
+  // ───────────── 出球機制 ─────────────
+
+  function ejectOneBall(callback) {
+    const available = balls.filter(b => !b.isExiting && !b.hasExited);
+    if (available.length === 0) {
+      if (callback) callback(null);
+      return;
+    }
+
+    const exitX = exitChannel.x;
+    const exitY = containerCenter.y - containerRadius;
+    available.sort((a, b) => {
+      const da = (a.position.x - exitX) ** 2 + (a.position.y - exitY) ** 2;
+      const db = (b.position.x - exitX) ** 2 + (b.position.y - exitY) ** 2;
+      return da - db;
+    });
+
+    const ball = available[0];
+    ball.isExiting = true;
+    ball.exitPhase = 'rising';
+    ball.exitTimer = 0;
+    ball.collisionFilter = { category: CAT_EXITING, mask: CAT_WALL };
+    ball.frictionAir = 0.02;
+    guideBallToExit(ball, callback);
+  }
+
+  /**
+   * 按名稱指定出球（Viewer 端使用）
+   * @param {string} name - 要彈出的球體名稱
+   * @param {Function} callback - 完成回呼
+   */
+  function ejectSpecificBall(name, callback) {
+    const ball = balls.find(b => b.name === name && !b.isExiting && !b.hasExited);
+    if (!ball) {
+      if (callback) callback(null);
+      return;
+    }
+
+    ball.isExiting = true;
+    ball.exitPhase = 'rising';
+    ball.exitTimer = 0;
+    ball.collisionFilter = { category: CAT_EXITING, mask: CAT_WALL };
+    ball.frictionAir = 0.02;
+    guideBallToExit(ball, callback);
+  }
+
+  function guideBallToExit(ball, onComplete) {
+    const enterY = containerCenter.y - containerRadius;
+    const enterRadius = exitChannel.width * 0.8;
+
+    function steer() {
+      if (ball.hasExited) {
+        clearInterval(ball._steerInterval);
+        return;
+      }
+      const pos = ball.position;
+      ball.exitTimer += 16;
+
+      if (ball.exitPhase === 'rising') {
+        const timeFactor = Math.min(ball.exitTimer / RISING_RAMP_DURATION, 1);
+        Body.applyForce(ball, pos, {
+          x: (exitChannel.x - pos.x) * (RISING_HORZ_BASE + timeFactor * RISING_HORZ_RAMP),
+          y: -(RISING_FORCE_BASE + timeFactor * RISING_FORCE_RAMP)
+        });
+        limitSpeed(ball, RISING_SPEED_LIMIT);
+
+        const dx = pos.x - exitChannel.x;
+        const dy = pos.y - enterY;
+        if (Math.sqrt(dx * dx + dy * dy) < enterRadius) {
+          ball.exitPhase = 'entering';
+        }
+        return;
+      }
+
+      if (ball.exitPhase === 'entering') {
+        Body.applyForce(ball, pos, {
+          x: (exitChannel.x - pos.x) * CHANNEL_FORCE_HORZ,
+          y: -CHANNEL_FORCE_UP
+        });
+        if (pos.y < enterY - 5) {
+          ball.exitPhase = 'upChannel';
+        }
+        return;
+      }
+
+      if (ball.exitPhase === 'upChannel') {
+        Body.applyForce(ball, pos, {
+          x: (exitChannel.x - pos.x) * CHANNEL_FORCE_HORZ,
+          y: -CHANNEL_FORCE_UP
+        });
+        if (pos.y < exitChannel.topY - 30) {
+          ball.hasExited = true;
+          clearInterval(ball._steerInterval);
+          World.remove(world, ball);
+          const idx = balls.indexOf(ball);
+          if (idx > -1) balls.splice(idx, 1);
+          if (onComplete) onComplete(ball.name);
+        }
+      }
+    }
+    ball._steerInterval = setInterval(steer, 16);
+  }
+
+  // ───────────── 物理更新主迴圈 ─────────────
+
+  function update(delta) {
+    Engine.update(engine, delta);
+    applyTurbulence(delta);
+
+    if (containerSealed) {
+      balls.forEach(ball => {
+        if (ball.isExiting || ball.hasExited) return;
+        const dx = ball.position.x - containerCenter.x;
+        const dy = ball.position.y - containerCenter.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > containerRadius * BOUNDARY_HARD_RATIO) {
+          const nx = dx / dist;
+          const ny = dy / dist;
+          Body.setPosition(ball, {
+            x: containerCenter.x + nx * containerRadius * BOUNDARY_TELEPORT_RATIO,
+            y: containerCenter.y + ny * containerRadius * BOUNDARY_TELEPORT_RATIO
+          });
+          const vDot = ball.velocity.x * nx + ball.velocity.y * ny;
+          if (vDot > 0) {
+            Body.setVelocity(ball, {
+              x: ball.velocity.x - nx * vDot,
+              y: ball.velocity.y - ny * vDot
+            });
+          }
+        }
+      });
+    }
+  }
+
+  function cleanup() {
+    if (ballCreationInterval) {
+      clearInterval(ballCreationInterval);
+      ballCreationInterval = null;
+    }
+    gateTimers.forEach(t => clearTimeout(t));
+    gateTimers = [];
+    balls.forEach(b => {
+      if (b._steerInterval) clearInterval(b._steerInterval);
+    });
+  }
+
+  // ───────────── 公開介面 ─────────────
+
+  return {
+    init, layout, getEngine: () => engine,
+    createBalls, sealContainer,
+    startTurbulence, stopTurbulence, ejectOneBall, ejectSpecificBall,
+    openExitGate, closeExitGate, isExitGateClosed,
+    setSwirlMultiplier(v) { swirlMultiplier = v; },
+    setBallRadius(r) { configBallRadius = r; },
+    update, cleanup,
+    getBalls: () => balls,
+    getContainerCenter: () => containerCenter,
+    getContainerRadius: () => containerRadius,
+    getExitGapHalfAngle: () => exitGapHalfAngle,
+    getEntryGapHalfAngle: () => entryGapHalfAngle,
+    getEntryAngle: () => entryAngle,
+    getExitChannel: () => exitChannel,
+    getEntryGateBodies: () => entryGateBodies,
+    isContainerSealed: () => containerSealed,
+    isTurbulenceActive: () => turbulenceActive,
+    getSwirlMultiplier: () => swirlMultiplier,
+    VORTEX_OFFSET_RATIO, VORTEX_BLEND_RATIO, FOUNTAIN_BASE_STRENGTH,
+    CAT_BALL, CAT_WALL, CAT_EXITING
+  };
+})();
+</script>

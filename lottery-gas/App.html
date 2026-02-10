@@ -1,0 +1,728 @@
+<script>
+/**
+ * App.html — 應用程式控制器（Master / Viewer 雙模式）
+ * Master: 完整操作 + 推送同步指令 + 回寫 Sheets
+ * Viewer: 接收指令 + 執行對應動作（無按鈕操作）
+ */
+const App = (() => {
+  const MAX_FRAME_DELTA = 32;
+  const FIRST_EJECT_DELAY = 3000;
+  const SETTLE_DELAY = 2000;
+  const DEFAULT_BALL_RADIUS = 24;
+
+  // 由 Index.html 的 data-mode 屬性注入
+  const MODE = document.body.dataset.mode || 'master';
+  const IS_MASTER = MODE === 'master';
+  const IS_VIEWER = MODE === 'viewer';
+
+  let state = 'IDLE';
+  let names = [];
+  let allNamesWithStatus = [];
+  let winners = [];
+  let animFrameId = null;
+  let lastTime = 0;
+  let ballRadius = DEFAULT_BALL_RADIUS;
+  let currentRound = 1;
+  let settings = {};
+
+  // Firebase 遙控器用
+  let lastFirebaseTimestamp = 0;
+
+  // ── DOM 元素參考 ──
+  const btnLoad = document.getElementById('btn-load');
+  const btnSpin = document.getElementById('btn-spin');
+  const btnDraw = document.getElementById('btn-draw');
+  const btnReset = document.getElementById('btn-reset');
+  const inputCount = document.getElementById('input-count');
+  const inputInterval = document.getElementById('input-interval');
+  const inputSwirl = document.getElementById('input-swirl');
+  const namesList = document.getElementById('names-list');
+  const winnerList = document.getElementById('winner-list');
+  const canvasEl = document.getElementById('canvas');
+  const inputBallSize = document.getElementById('input-ball-size');
+  const inputFontSize = document.getElementById('input-font-size');
+  const viewerStatus = document.getElementById('viewer-status');
+  const viewerStatusText = document.getElementById('viewer-status-text');
+  const selectSheet = document.getElementById('select-sheet');
+
+  // ── Viewer 出球隊列 ──
+  let ejectQueue = [];
+  let isProcessingEject = false;
+
+  /** 取得目前選取的工作表名稱 */
+  function getSelectedSheet() {
+    return selectSheet ? selectSheet.value : '';
+  }
+
+  /** 刷新名單顯示（左側面板 + 右側中獎面板 + 數量上限） */
+  function refreshNameDisplay() {
+    populateNamesList();
+    inputCount.max = names.length;
+    inputCount.value = Math.min(parseInt(inputCount.value, 10) || 1, names.length);
+    winnerList.innerHTML = '';
+    if (winners.length > 0) {
+      winners.forEach(name => {
+        const li = document.createElement('li');
+        li.textContent = name;
+        winnerList.appendChild(li);
+      });
+    }
+  }
+
+  // ===== 共用函式 =====
+
+  /** 從 Google Sheets 載入可用的工作表名稱 */
+  function loadSheetNames() {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(sheetNames => {
+          selectSheet.innerHTML = '';
+          sheetNames.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            selectSheet.appendChild(opt);
+          });
+          resolve(sheetNames);
+        })
+        .withFailureHandler(reject)
+        .api_getListSheetNames();
+    });
+  }
+
+  /** 從 Google Sheets 載入名單 */
+  function loadNamesFromSheets() {
+    const sheetName = getSelectedSheet();
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(result => {
+          allNamesWithStatus = result;
+          names = result.filter(r => !r.won).map(r => r.name);
+          winners = result.filter(r => r.won).map(r => r.name);
+          resolve();
+        })
+        .withFailureHandler(reject)
+        .api_getAllNamesWithStatus(sheetName);
+    });
+  }
+
+  /** 從 Google Sheets 載入設定 */
+  function loadSettings() {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(result => {
+          settings = result;
+          applySettings(result);
+          resolve();
+        })
+        .withFailureHandler(reject)
+        .api_getSettings();
+    });
+  }
+
+  /** 套用設定到 UI 控制項 */
+  function applySettings(s) {
+    if (s.ballSize) inputBallSize.value = s.ballSize;
+    if (s.fontSize !== undefined) inputFontSize.value = s.fontSize;
+    if (s.swirl) inputSwirl.value = s.swirl;
+    if (s.interval) inputInterval.value = s.interval;
+    if (s.count) inputCount.value = s.count;
+  }
+
+  function populateNamesList() {
+    namesList.innerHTML = '';
+    allNamesWithStatus.forEach(item => {
+      const li = document.createElement('li');
+      li.dataset.name = item.name;
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = '🎯';
+      li.appendChild(badge);
+      li.appendChild(document.createTextNode(item.name));
+      if (item.won) li.classList.add('won');
+      namesList.appendChild(li);
+    });
+  }
+
+  function markWinner(name) {
+    const items = namesList.querySelectorAll('li');
+    for (const li of items) {
+      if (li.dataset.name === name && !li.classList.contains('won')) {
+        li.classList.add('won');
+        li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        break;
+      }
+    }
+  }
+
+  function addToWinnerList(name) {
+    winners.push(name);
+    markWinner(name);
+    const li = document.createElement('li');
+    li.textContent = name;
+    winnerList.appendChild(li);
+    winnerList.scrollTop = winnerList.scrollHeight;
+  }
+
+  function setState(newState) {
+    state = newState;
+    Sync.setState(newState);
+    updateUI();
+    if (IS_MASTER) writeFirebaseStatus();
+  }
+
+  /** Master: 寫入 Firebase status 供 Controller 讀取 */
+  function writeFirebaseStatus() {
+    if (typeof FirebaseDB === 'undefined') return;
+    FirebaseDB.statusRef.set({ state: state });
+  }
+
+  function updateUI() {
+    if (IS_VIEWER) {
+      // Viewer 模式：所有按鈕永遠隱藏（由 CSS 處理）
+      if (viewerStatusText) {
+        const labels = {
+          IDLE: '等待主控端開始...',
+          LOADING: '正在載入球體...',
+          READY: '就緒',
+          SPINNING: '轉動中...',
+          DRAWING: '抽籤中...',
+          COMPLETE: '抽獎完成！'
+        };
+        viewerStatusText.textContent = labels[state] || state;
+      }
+      return;
+    }
+
+    // Master 模式：正常按鈕邏輯
+    btnLoad.disabled = state !== 'IDLE';
+    btnSpin.disabled = (state !== 'READY' && state !== 'SPINNING');
+    btnSpin.textContent = state === 'SPINNING' ? '停止' : '轉動';
+    btnSpin.classList.toggle('spinning', state === 'SPINNING');
+    btnDraw.disabled = state !== 'SPINNING';
+    btnReset.disabled = (state === 'IDLE' || state === 'LOADING' || state === 'DRAWING');
+    inputCount.disabled = (state !== 'READY' && state !== 'IDLE' && state !== 'SPINNING');
+    inputBallSize.disabled = state !== 'IDLE';
+    selectSheet.disabled = state !== 'IDLE';
+  }
+
+  let physicsInited = false;
+
+  function applyUserSettings() {
+    ballRadius = parseInt(inputBallSize.value, 10) || DEFAULT_BALL_RADIUS;
+    Physics.setBallRadius(ballRadius);
+    Renderer.setFontSize(parseInt(inputFontSize.value, 10) || 0);
+    Physics.setSwirlMultiplier((parseInt(inputSwirl.value, 10) || 75) / 10);
+  }
+
+  function initPhysicsAndRenderer() {
+    if (!physicsInited) {
+      Physics.init();
+      physicsInited = true;
+    }
+    Renderer.init(canvasEl);
+    applyUserSettings();
+    const { width, height } = Renderer.getSize();
+    Physics.layout(width, height);
+  }
+
+  function drawPreview() {
+    initPhysicsAndRenderer();
+    Renderer.drawFrame();
+  }
+
+  function startLoop() {
+    if (animFrameId) return;
+    lastTime = performance.now();
+    function loop(now) {
+      const delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
+      lastTime = now;
+      Physics.update(delta);
+      Renderer.drawFrame();
+      animFrameId = requestAnimationFrame(loop);
+    }
+    animFrameId = requestAnimationFrame(loop);
+  }
+
+  function stopLoop() {
+    if (animFrameId) {
+      cancelAnimationFrame(animFrameId);
+      animFrameId = null;
+    }
+  }
+
+  // ===== Master 專用函式 =====
+
+  function handleLoad() {
+    if (state !== 'IDLE') return;
+    setState('LOADING');
+
+    applyUserSettings();
+    const { width, height } = Renderer.getSize();
+    Physics.layout(width, height);
+    startLoop();
+
+    // 推送 INIT 指令
+    Sync.push({
+      action: 'INIT',
+      payload: {
+        names: names,
+        sheetName: getSelectedSheet(),
+        settings: {
+          ballSize: parseInt(inputBallSize.value, 10),
+          fontSize: parseInt(inputFontSize.value, 10),
+          swirl: parseInt(inputSwirl.value, 10),
+          interval: parseInt(inputInterval.value, 10),
+          count: parseInt(inputCount.value, 10)
+        }
+      }
+    });
+
+    Physics.createBalls(names, ballRadius, () => {
+      setTimeout(() => {
+        Physics.sealContainer();
+        Renderer.setLidSealed(true);
+        setState('READY');
+        Sync.push({ action: 'SEALED', payload: {} });
+      }, SETTLE_DELAY);
+    });
+  }
+
+  function handleSpin() {
+    if (state === 'READY') {
+      Physics.startTurbulence();
+      setState('SPINNING');
+      Sync.push({ action: 'START_TURBULENCE', payload: {} });
+    } else if (state === 'SPINNING') {
+      Physics.stopTurbulence();
+      setState('READY');
+      Sync.push({ action: 'STOP_TURBULENCE', payload: {} });
+    }
+  }
+
+  function handleDraw() {
+    if (state !== 'SPINNING') return;
+    const count = parseInt(inputCount.value, 10);
+    if (!count || count < 1) return;
+
+    const remainingBalls = Physics.getBalls().length;
+    const actualCount = Math.min(count, remainingBalls);
+    if (actualCount === 0) return;
+
+    setState('DRAWING');
+    Sync.push({ action: 'DRAW_START', payload: {} });
+
+    const intervalSec = parseInt(inputInterval.value, 10) || 3;
+    let drawn = 0;
+
+    function ejectCycle() {
+      Physics.openExitGate();
+      Physics.ejectOneBall((name) => {
+        Physics.closeExitGate();
+
+        if (name === null) {
+          finishDrawing();
+          return;
+        }
+
+        drawn++;
+        addToWinnerList(name);
+
+        // 回寫 Sheets + 推送 EJECT 指令
+        google.script.run.api_recordWinner(name, currentRound, getSelectedSheet());
+        Sync.push({ action: 'EJECT', payload: { name: name } });
+
+        if (drawn >= actualCount) {
+          finishDrawing();
+        } else {
+          setTimeout(ejectCycle, intervalSec * 1000);
+        }
+      });
+    }
+
+    function finishDrawing() {
+      Physics.closeExitGate();
+      const remaining = Physics.getBalls().length;
+      const hasRemaining = remaining > 0;
+
+      if (!hasRemaining) {
+        Physics.stopTurbulence();
+        setState('COMPLETE');
+      } else {
+        Physics.stopTurbulence();
+        setState('READY');
+        inputCount.max = remaining;
+        if (parseInt(inputCount.value, 10) > remaining) {
+          inputCount.value = remaining;
+        }
+      }
+
+      currentRound++;
+      Sync.push({ action: 'BATCH_DONE', payload: { hasRemaining: hasRemaining } });
+    }
+
+    setTimeout(ejectCycle, FIRST_EJECT_DELAY);
+  }
+
+  function handleReset() {
+    if (state === 'IDLE' || state === 'LOADING' || state === 'DRAWING') return;
+
+    if (state === 'SPINNING') {
+      Physics.stopTurbulence();
+    }
+
+    stopLoop();
+    Physics.cleanup();
+
+    Renderer.setEntryOpen(false);
+    Renderer.setLidSealed(false);
+
+    // 清除同步狀態 + 推送 RESET
+    Sync.push({ action: 'RESET', payload: {} }).then(() => {
+      Sync.clearSync();
+    });
+
+    // 重新從 Sheets 讀取（保留已中獎狀態），只重建畫面
+    loadNamesFromSheets().then(() => {
+      populateNamesList();
+      winnerList.innerHTML = '';
+      // 右側面板重新顯示所有已中獎者（含先前 + 本次）
+      if (winners.length > 0) {
+        winners.forEach(name => {
+          const li = document.createElement('li');
+          li.textContent = name;
+          winnerList.appendChild(li);
+        });
+      }
+      inputCount.max = names.length;
+      inputCount.value = Math.min(parseInt(inputCount.value, 10) || 1, names.length);
+      drawPreview();
+      setState('IDLE');
+    });
+  }
+
+  function handleSwirlChange() {
+    const val = parseInt(inputSwirl.value, 10);
+    Physics.setSwirlMultiplier(val / 10);
+  }
+
+  function handleFontSizeChange() {
+    const val = parseInt(inputFontSize.value, 10) || 0;
+    Renderer.setFontSize(val);
+  }
+
+  function handleResize() {
+    if (state === 'IDLE') {
+      drawPreview();
+      return;
+    }
+    Renderer.resize();
+  }
+
+  // ===== Viewer 專用函式 =====
+
+  /**
+   * 處理從 Master 收到的同步指令
+   * @param {Array} commands - 指令陣列
+   */
+  function handleSyncCommands(commands) {
+    commands.forEach(cmd => {
+      switch (cmd.action) {
+        case 'INIT':
+          viewerInit(cmd.payload);
+          break;
+        case 'SEALED':
+          viewerSealed();
+          break;
+        case 'START_TURBULENCE':
+          viewerStartTurbulence();
+          break;
+        case 'STOP_TURBULENCE':
+          viewerStopTurbulence();
+          break;
+        case 'DRAW_START':
+          viewerDrawStart();
+          break;
+        case 'EJECT':
+          viewerEject(cmd.payload);
+          break;
+        case 'BATCH_DONE':
+          viewerBatchDone(cmd.payload);
+          break;
+        case 'RESET':
+          viewerReset();
+          break;
+      }
+    });
+  }
+
+  function viewerInit(payload) {
+    names = payload.names || [];
+    const s = payload.settings || {};
+    applySettings(s);
+    applyUserSettings();
+
+    // 重建全名單狀態
+    allNamesWithStatus = names.map(n => ({ name: n, won: false }));
+    populateNamesList();
+
+    setState('LOADING');
+    const { width, height } = Renderer.getSize();
+    Physics.layout(width, height);
+    startLoop();
+
+    Physics.createBalls(names, ballRadius, () => {
+      // Viewer 不需要等沉澱，SEALED 指令會控制
+    });
+  }
+
+  function viewerSealed() {
+    Physics.sealContainer();
+    Renderer.setLidSealed(true);
+    setState('READY');
+  }
+
+  function viewerStartTurbulence() {
+    Physics.startTurbulence();
+    setState('SPINNING');
+  }
+
+  function viewerStopTurbulence() {
+    Physics.stopTurbulence();
+    setState('READY');
+  }
+
+  function viewerDrawStart() {
+    setState('DRAWING');
+  }
+
+  function viewerEject(payload) {
+    if (!payload || !payload.name) return;
+    ejectQueue.push(payload.name);
+    processEjectQueue();
+  }
+
+  /** 逐一處理出球隊列（等上一顆完成才處理下一顆） */
+  function processEjectQueue() {
+    if (isProcessingEject || ejectQueue.length === 0) return;
+    isProcessingEject = true;
+
+    const name = ejectQueue.shift();
+    Physics.openExitGate();
+    Physics.ejectSpecificBall(name, (ejectedName) => {
+      Physics.closeExitGate();
+      if (ejectedName) {
+        addToWinnerList(ejectedName);
+      }
+      isProcessingEject = false;
+      processEjectQueue();
+    });
+  }
+
+  function viewerBatchDone(payload) {
+    if (payload && payload.hasRemaining) {
+      Physics.stopTurbulence();
+      setState('READY');
+    } else {
+      Physics.stopTurbulence();
+      setState('COMPLETE');
+    }
+  }
+
+  function viewerReset() {
+    if (state === 'SPINNING') {
+      Physics.stopTurbulence();
+    }
+
+    stopLoop();
+    Physics.cleanup();
+
+    winners = [];
+    ejectQueue = [];
+    isProcessingEject = false;
+    winnerList.innerHTML = '';
+    namesList.querySelectorAll('li.won').forEach(li => li.classList.remove('won'));
+
+    Renderer.setEntryOpen(false);
+    Renderer.setLidSealed(false);
+
+    Sync.resetVersion();
+    drawPreview();
+    setState('IDLE');
+  }
+
+  /**
+   * 首次連線快照恢復（Late-Join Recovery）
+   * 根據快照重建目前狀態
+   */
+  function handleFirstSync(snapshot) {
+    if (!snapshot) return;
+
+    const snapshotState = snapshot.state;
+
+    // IDLE 狀態不需要做什麼
+    if (snapshotState === 'IDLE') {
+      setState('IDLE');
+      return;
+    }
+
+    // 需要建立球體的狀態
+    const needsBalls = ['LOADING', 'READY', 'SPINNING', 'DRAWING', 'COMPLETE'];
+    if (needsBalls.includes(snapshotState)) {
+      const s = snapshot.settings || {};
+      applySettings(s);
+      applyUserSettings();
+
+      // 過濾掉已中獎者（只建立剩餘球體）
+      const allNames = snapshot.names || [];
+      const wonNames = snapshot.winners || [];
+      const remainingNames = allNames.filter(n => !wonNames.includes(n));
+
+      // 建立全名單顯示
+      allNamesWithStatus = allNames.map(n => ({
+        name: n,
+        won: wonNames.includes(n)
+      }));
+      populateNamesList();
+
+      // 顯示已中獎者
+      wonNames.forEach(name => {
+        const li = document.createElement('li');
+        li.textContent = name;
+        winnerList.appendChild(li);
+      });
+      winners = wonNames.slice();
+
+      if (snapshotState === 'COMPLETE' || remainingNames.length === 0) {
+        // 全部抽完
+        setState('COMPLETE');
+        drawPreview();
+        return;
+      }
+
+      // 建立剩餘球體
+      names = remainingNames;
+      const { width, height } = Renderer.getSize();
+      Physics.layout(width, height);
+      startLoop();
+
+      Physics.createBalls(remainingNames, ballRadius, () => {
+        Physics.sealContainer();
+        Renderer.setLidSealed(true);
+
+        if (snapshot.turbulenceActive) {
+          Physics.startTurbulence();
+          setState(snapshotState === 'DRAWING' ? 'DRAWING' : 'SPINNING');
+        } else {
+          setState(snapshotState);
+        }
+      });
+    }
+  }
+
+  // ===== Firebase 遙控器監聽（Master 專用） =====
+
+  function startFirebaseCommandListener() {
+    if (typeof FirebaseDB === 'undefined') return;
+
+    FirebaseDB.commandRef.on('value', snapshot => {
+      const cmd = snapshot.val();
+      if (!cmd || !cmd.action || !cmd.timestamp) return;
+
+      // 比對 timestamp 避免重複執行
+      if (cmd.timestamp <= lastFirebaseTimestamp) return;
+      lastFirebaseTimestamp = cmd.timestamp;
+
+      switch (cmd.action) {
+        case 'LOAD':
+          handleLoad();
+          break;
+        case 'SPIN':
+          handleSpin();
+          break;
+        case 'DRAW':
+          handleDraw();
+          break;
+        case 'RESET':
+          handleReset();
+          break;
+      }
+    });
+  }
+
+  // ===== 事件綁定 =====
+
+  function bindEvents() {
+    if (IS_MASTER) {
+      btnLoad.addEventListener('click', () => handleLoad());
+      btnSpin.addEventListener('click', () => handleSpin());
+      btnDraw.addEventListener('click', () => handleDraw());
+      btnReset.addEventListener('click', () => handleReset());
+      inputSwirl.addEventListener('input', handleSwirlChange);
+      inputFontSize.addEventListener('input', handleFontSizeChange);
+      document.querySelectorAll('.preset-btn[data-ball]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          inputBallSize.value = btn.dataset.ball;
+        });
+      });
+    }
+    window.addEventListener('resize', handleResize);
+  }
+
+  // ===== 啟動 =====
+
+  async function start() {
+    // Viewer 模式加上 CSS class
+    if (IS_VIEWER) {
+      document.body.classList.add('viewer-mode');
+    }
+
+    try {
+      await loadSheetNames();
+      await loadNamesFromSheets();
+      await loadSettings();
+    } catch (e) {
+      console.error('載入資料失敗:', e);
+    }
+
+    refreshNameDisplay();
+    bindEvents();
+
+    // 切換工作表時重新載入名單
+    if (IS_MASTER) {
+      selectSheet.addEventListener('change', async () => {
+        if (state !== 'IDLE') return;
+        try {
+          await loadNamesFromSheets();
+        } catch (e) {
+          console.error('切換工作表失敗:', e);
+        }
+        refreshNameDisplay();
+      });
+    }
+
+    updateUI();
+    drawPreview();
+
+    if (IS_MASTER) {
+      // Master 啟動 Firebase 遙控器監聽 + 寫入初始 status
+      startFirebaseCommandListener();
+      writeFirebaseStatus();
+    }
+
+    if (IS_VIEWER) {
+      // Viewer 啟動 polling
+      Sync.startPolling(
+        handleSyncCommands,
+        handleFirstSync,
+        (errMsg) => {
+          if (viewerStatus) viewerStatus.classList.add('disconnected');
+          if (viewerStatusText) viewerStatusText.textContent = errMsg;
+        }
+      );
+    }
+  }
+
+  start();
+})();
+</script>
