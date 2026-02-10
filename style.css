@@ -246,18 +246,61 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 12px 16px;
-  list-style-position: inside;
+  list-style: none;
 }
 
 #winner-list li {
-  padding: 8px 4px;
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
   border-bottom: 1px solid var(--color-item-border);
   animation: fadeSlideIn 0.4s ease-out;
 }
 
 #winner-list li:last-child {
   border-bottom: none;
+}
+
+/* ── Winner ball (CSS replica of canvas ball) ── */
+
+.winner-ball {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffcc44 10%, #e8941c 70%, #b06a10 100%);
+  border: 1px solid rgba(180, 120, 40, 0.6);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #2a1800;
+  font-weight: bold;
+  font-size: 14px;
+  text-align: center;
+  line-height: 1.1;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.winner-ball::after {
+  content: '';
+  position: absolute;
+  top: 15%;
+  left: 15%;
+  width: 35%;
+  height: 35%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+}
+
+.winner-name {
+  font-size: 16px;
+  color: var(--color-accent);
+  font-weight: 600;
 }
 
 @keyframes fadeSlideIn {

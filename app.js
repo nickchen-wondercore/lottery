@@ -61,6 +61,33 @@ const App = (() => {
     });
   }
 
+  /** 計算中獎球體內文字的自適應大小（仿 renderer.js 的 Canvas 球體文字縮放邏輯） */
+  function calcBallFontSize(name, ballDiameter) {
+    const usableWidth = ballDiameter * 0.78;
+    let totalWeight = 0;
+    for (const ch of name) {
+      totalWeight += ch.charCodeAt(0) > 0x7F ? 1 : 0.6;
+    }
+    if (totalWeight === 0) return 14;
+    const size = usableWidth / totalWeight;
+    return Math.max(6, Math.min(14, size));
+  }
+
+  /** 建立中獎者 <li> 元素（籤球 + 名字） */
+  function createWinnerLi(name) {
+    const li = document.createElement('li');
+    const ball = document.createElement('span');
+    ball.className = 'winner-ball';
+    ball.textContent = name;
+    ball.style.fontSize = calcBallFontSize(name, 38) + 'px';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'winner-name';
+    nameSpan.textContent = name;
+    li.appendChild(ball);
+    li.appendChild(nameSpan);
+    return li;
+  }
+
   /** 在左側名單中標記中獎者（加上 .won class，badge 淡入 + 文字變金色），並自動捲動至該位置 */
   function markWinner(name) {
     const items = namesList.querySelectorAll('li');
@@ -98,6 +125,7 @@ const App = (() => {
     ballRadius = parseInt(inputBallSize.value, 10) || DEFAULT_BALL_RADIUS;
     Physics.setBallRadius(ballRadius);
     Renderer.setFontSize(parseInt(inputFontSize.value, 10) || 0);
+    Physics.setSwirlMultiplier((parseInt(inputSwirl.value, 10) || 75) / 10);
   }
 
   /** 初始化物理引擎與繪製器（僅首次建立引擎），並根據 Canvas 尺寸配置版面 */
@@ -119,7 +147,15 @@ const App = (() => {
   }
 
   /** 啟動 requestAnimationFrame 動畫迴圈，每幀更新物理 + 繪製畫面 */
+  function stopLoop() {
+    if (animFrameId) {
+      cancelAnimationFrame(animFrameId);
+      animFrameId = null;
+    }
+  }
+
   function startLoop() {
+    if (animFrameId) return;
     lastTime = performance.now();
     function loop(now) {
       const delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
@@ -198,9 +234,7 @@ const App = (() => {
         drawn++;
         winners.push(name);
         markWinner(name);
-        const li = document.createElement('li');
-        li.textContent = name;
-        winnerList.appendChild(li);
+        winnerList.appendChild(createWinnerLi(name));
         winnerList.scrollTop = winnerList.scrollHeight;
 
         if (drawn >= actualCount) {
@@ -240,10 +274,7 @@ const App = (() => {
       Physics.stopTurbulence();
     }
 
-    if (animFrameId) {
-      cancelAnimationFrame(animFrameId);
-      animFrameId = null;
-    }
+    stopLoop();
     Physics.cleanup();
 
     winners = [];
