@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-02-10 (v2)
+
+### Added — 中籤名單籤球樣式 + 靜態版同步修正
+- **中籤名單籤球樣式** — 右側中獎面板從純文字改為「籤球 + 名字」格式
+  - `.winner-ball`：38px CSS 圓球，`radial-gradient` 金色漸層 + `::after` 高光，模擬 Canvas 球體外觀
+  - `.winner-name`：金色粗體文字顯示在球右側
+  - `<ol>` 移除數字序號（`list-style: none`）
+- **球體內文字自適應** — `calcBallFontSize(name, ballDiameter)` 依字元寬度估算字型大小
+  - 中文字元權重 1，英數字元權重 0.6，fontSize clamp 在 6px ~ 14px
+- **`createWinnerLi(name)` 共用函式** — 統一建立中獎 `<li>` 元素，兩版（靜態 / GAS）共用
+
+### Fixed — 靜態版 app.js 與 GAS App.html 同步
+- `applyUserSettings()` 補上 `Physics.setSwirlMultiplier()`，入籤筒時正確套用氣流值
+- `startLoop()` 加入 `if (animFrameId) return;` 防止重複啟動動畫迴圈
+- 抽出 `stopLoop()` 獨立函式，`handleReset()` 改用
+
+### Changed
+- `style.css` / `Style.html`：`#winner-list` 新增 `.winner-ball`、`.winner-name` 樣式
+- `app.js`：中獎項目建立改用 `createWinnerLi()`，新增 `calcBallFontSize()`、`stopLoop()`
+- `App.html`：所有建立中獎 `<li>` 的位置（`refreshNameDisplay`、`handleReset`、`handleFirstSync`）統一改用 `createWinnerLi()`
+
+---
+
 ## 2026-02-10
 
 ### Added — Firebase 遙控器（Controller）

@@ -73,7 +73,7 @@ lottery/
 |------|---------|------|
 | `physics.js` | `Physics` | Matter.js 物理模擬：圓形容器、出口管、channelStopper、球體生成、噴泉式雙渦流亂流（拆為子函式）、彈射出球、RWD 背景對齊。頂部定義所有命名常數，提供 `normalizeAngle()`/`angularDistance()`/`limitSpeed()` 工具函式 |
 | `renderer.js` | `Renderer` | Canvas 2D 自訂繪製：分層渲染（出口管 → 容器填充 → 風場粒子 → 球體 → 容器邊框），風場粒子使用 Physics 導出常數（`VORTEX_OFFSET_RATIO` 等）避免跨檔案重複 |
-| `app.js` | `App` | 狀態機控制器（IDLE → LOADING → READY ⇄ SPINNING → DRAWING → READY/COMPLETE），UI 綁定、名單面板管理、中獎標記。`applyUserSettings()` 統一讀取輸入值 |
+| `app.js` | `App` | 狀態機控制器（IDLE → LOADING → READY ⇄ SPINNING → DRAWING → READY/COMPLETE），UI 綁定、名單面板管理、中獎標記。`applyUserSettings()` 統一讀取輸入值（含氣流倍率）。`createWinnerLi()` 建立籤球式中獎項目 |
 
 ### Google Apps Script 版
 
@@ -121,7 +121,7 @@ Controller 頁面載入順序為 `FirebaseConfig.html` → `ControllerApp.html`�
 │  #names-panel │       #main-area            │ #winner-panel│
 │  抽獎名單     │  ┌─────────────────────┐    │  中籤名單     │
 │  (340px)      │  │     #canvas         │    │  (240px)     │
-│  兩欄式名單   │  │   (物理 + 繪製)      │    │  <ol>中獎者   │
+│  兩欄式名單   │  │   (物理 + 繪製)      │    │  籤球+名字列表 │
 │  中獎→emoji亮  │  └─────────────────────┘    │              │
 │               │  ┌─────────────────────┐    │              │
 │               │  │  #controls (Master) │    │              │
@@ -204,6 +204,16 @@ IDLE → LOADING → READY ⇄ SPINNING → DRAWING → READY (有剩餘球，�
 - 按下「抽籤」後，第一顆球延遲 3 秒才開始彈出（`setTimeout(ejectCycle, 3000)`）
 - 後續出球按「間隔」秒數正常執行
 - 目的：防止抽獎者透過讀秒按下按鈕來指定中獎者
+
+#### 右側中籤名單面板（240px）
+- 中獎者以「籤球 + 名字」格式顯示，籤球為 CSS 模擬的 Canvas 球體外觀
+- `.winner-ball`：38px 圓形，`radial-gradient` 金色漸層（`#ffcc44` → `#e8941c` → `#b06a10`）+ `::after` 高光
+- `.winner-name`：金色粗體文字，顯示在球右側
+- 球體內文字自適應大小：`calcBallFontSize(name, ballDiameter)` 依字元寬度估算
+  - 中文字元權重 1，英數字元權重 0.6
+  - `fontSize = 可用寬度 / 總權重`，clamp 在 6px ~ 14px
+- `createWinnerLi(name)` 共用函式統一建立中獎 `<li>` 元素（兩版共用）
+- `<ol>` 使用 `list-style: none`，不顯示數字序號
 
 #### 球大小預設按鈕
 - 「小」= 26（適合總名單人多時使用）
@@ -330,7 +340,7 @@ names.json → fetch → app.js (names[])
                         ├→ Physics.ejectOneBall(callback)
                         │    └→ callback(name)
                         │         ├→ markWinner(name) → #names-list .won
-                        │         └→ append to #winner-list
+                        │         └→ createWinnerLi(name) → #winner-list
                         └→ Renderer.drawFrame() (每幀)
 ```
 
