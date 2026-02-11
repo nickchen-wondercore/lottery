@@ -25,7 +25,7 @@
    ```bash
    python3 -m http.server 8080
    # 或
-   npx -y http-server ./ -p 8080
+   npx -y serve ./ -p 8080
    ```
 3. 瀏覽器開啟 `http://localhost:8080/`
 

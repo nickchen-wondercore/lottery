@@ -1,0 +1,14 @@
+{
+  "name": "lottery-gas",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "",
+  "scripts": {
+    "clasp-pull": "clasp pull",
+    "clasp-push": "clasp push",
+    "clasp-deploy": "clasp deploy --deploymentId  {deploymentId}"
+  }
+}
